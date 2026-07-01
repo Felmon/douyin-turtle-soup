@@ -117,6 +117,9 @@ textarea{width:100%;min-height:80px;resize:vertical}
 .theme-card .name{font-size:14px;font-weight:700;color:#e2e8f0;margin-bottom:4px}
 .theme-card .accent{display:inline-block;width:12px;height:12px;border-radius:50%;margin-right:6px;vertical-align:middle}
 .theme-card .btn{margin-top:8px;width:100%}
+.chart-wrap{position:relative;height:140px}
+.chart-tooltip{position:absolute;display:none;background:rgba(0,0,0,0.85);color:#e2e8f0;padding:6px 10px;border-radius:6px;font-size:11px;pointer-events:none;white-space:nowrap;z-index:10;border:1px solid rgba(255,255,255,0.1);backdrop-filter:blur(4px)}
+canvas{max-width:100%}
 </style>
 </head>
 <body>
@@ -161,6 +164,7 @@ textarea{width:100%;min-height:80px;resize:vertical}
           <h2>难度选择（5档）</h2>
           <div class="diff-grid" id="diffGrid"></div>
           <div style="font-size:11px;color:#64748b;margin-top:6px">当前难度：<span id="curDiff" style="color:#00d4ff;font-weight:600">-</span></div>
+          <div style="font-size:11px;color:#64748b;margin-top:4px">局数：<span id="adminRoundCount" style="color:#22c55e">0</span> &nbsp;|&nbsp; 时长：<span id="adminDuration" style="color:#22c55e">00:00</span></div>
         </div>
       </div>
 
@@ -177,7 +181,7 @@ textarea{width:100%;min-height:80px;resize:vertical}
         </div>
 
         <div class="section">
-          <h2>操作日志</h2>
+          <h2>操作日志 <button class="btn btn-ghost btn-sm" onclick="clearLog()" style="float:right">清空</button></h2>
           <div id="logList" style="max-height:200px;overflow-y:auto;background:rgba(0,0,0,0.3);border-radius:6px;padding:8px;font-size:11px;font-family:monospace;color:#94a3b8"></div>
         </div>
       </div>
@@ -222,6 +226,10 @@ textarea{width:100%;min-height:80px;resize:vertical}
         <span style="font-size:11px;color:#64748b;margin-left:8px">使用 DeepSeek 自动生成符合当前难度的题目，生成后人工审核入库</span>
       </div>
       <div id="aiPendingList"></div>
+      <div id="aiBatchActions" style="display:none;margin-top:8px;display:flex;gap:8px">
+        <button class="btn btn-success btn-sm" onclick="approveAllAi()">✓ 全部入库</button>
+        <button class="btn btn-danger btn-sm" onclick="rejectAllAi()">✗ 全部废弃</button>
+      </div>
     </div>
   </div>
 
@@ -232,6 +240,19 @@ textarea{width:100%;min-height:80px;resize:vertical}
       <div class="metric-card"><div class="label">本局弹幕数</div><div class="val green" id="mTotalDanmaku">0</div></div>
       <div class="metric-card"><div class="label">本局礼物数</div><div class="val" id="mTotalGifts">0</div></div>
       <div class="metric-card"><div class="label">付费用户数</div><div class="val gold" id="mPaidUsers">0</div></div>
+      <div class="metric-card"><div class="label">本场局数</div><div class="val green" id="mRoundCount">0</div></div>
+      <div class="metric-card"><div class="label">本场时长</div><div class="val" id="mSessionDuration">00:00</div></div>
+      <div class="metric-card"><div class="label">答对率</div><div class="val gold" id="mAccuracy">0%</div></div>
+    </div>
+    <div class="grid-2" style="margin-bottom:16px">
+      <div class="section">
+        <h2>📈 弹幕趋势</h2>
+        <div class="chart-wrap"><canvas id="adminDanmakuChart"></canvas><div class="chart-tooltip" id="adminDanmakuTooltip"></div></div>
+      </div>
+      <div class="section">
+        <h2>🎁 礼物收入趋势</h2>
+        <div class="chart-wrap"><canvas id="adminGiftChart"></canvas><div class="chart-tooltip" id="adminGiftTooltip"></div></div>
+      </div>
     </div>
     <div class="section">
       <h2>最近 10 条礼物</h2>
@@ -320,6 +341,16 @@ function updateMetrics(m) {
   document.getElementById('mTotalDanmaku').textContent = m.totalDanmaku ?? 0;
   document.getElementById('mTotalGifts').textContent = m.totalGifts ?? 0;
   document.getElementById('mPaidUsers').textContent = m.paid_users ?? 0;
+  document.getElementById('mRoundCount').textContent = m.round_count ?? 0;
+  const dur = m.session_duration || 0;
+  document.getElementById('mSessionDuration').textContent = String(Math.floor(dur/60)).padStart(2,'0') + ':' + String(dur%60).padStart(2,'0');
+  document.getElementById('mAccuracy').textContent = (m.accuracy||0) + '%';
+  document.getElementById('adminRoundCount').textContent = m.round_count ?? 0;
+  document.getElementById('adminDuration').textContent = String(Math.floor(dur/60)).padStart(2,'0') + ':' + String(dur%60).padStart(2,'0');
+
+  if (m.danmaku_series) adminDrawChart('adminDanmakuChart', m.danmaku_series, '#00d4ff', '条/分');
+  if (m.gift_series) adminDrawChart('adminGiftChart', m.gift_series, '#fbbf24', '抖币/分');
+
   // 最近礼物列表
   const list = document.getElementById('recentGifts');
   if (m.recentGifts && m.recentGifts.length > 0) {
@@ -333,6 +364,84 @@ function updateMetrics(m) {
   } else {
     list.innerHTML = '<div class="empty">暂无礼物记录</div>';
   }
+}
+
+function adminDrawChart(id, data, color, label) {
+  const canvas = document.getElementById(id);
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = Math.round(rect.width * dpr);
+  canvas.height = Math.round(rect.height * dpr);
+  ctx.scale(dpr, dpr);
+  const w = rect.width, h = rect.height;
+  ctx.clearRect(0, 0, w, h);
+
+  const sliced = data.slice(-60);
+  if (!sliced || sliced.length < 2) {
+    ctx.fillStyle = '#64748b'; ctx.font = '12px sans-serif';
+    ctx.textAlign = 'center'; ctx.fillText('等待数据...', w/2, h/2);
+    canvas._chartData = null;
+    return;
+  }
+
+  const max = Math.max(...sliced, 1);
+  const pad = { top: 8, right: 8, bottom: 16, left: 36 };
+  const plotW = w - pad.left - pad.right;
+  const plotH = h - pad.top - pad.bottom;
+  const step = plotW / (sliced.length - 1);
+
+  // Y轴网格线 + 标签
+  ctx.textAlign = 'right';
+  ctx.font = '10px sans-serif';
+  ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+  ctx.lineWidth = 1;
+  ctx.fillStyle = '#64748b';
+  for (let i = 0; i <= 4; i++) {
+    const y = pad.top + (plotH / 4) * i;
+    const val = Math.round(max - (max / 4) * i);
+    ctx.beginPath();
+    ctx.setLineDash([3, 3]);
+    ctx.moveTo(pad.left, y);
+    ctx.lineTo(w - pad.right, y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillText(val, pad.left - 4, y + 3);
+  }
+
+  const grad = ctx.createLinearGradient(0, pad.top, 0, h);
+  grad.addColorStop(0, color + '66');
+  grad.addColorStop(1, color + '00');
+  ctx.beginPath();
+  ctx.moveTo(pad.left, h - pad.bottom);
+  sliced.forEach((v, i) => {
+    ctx.lineTo(pad.left + i * step, pad.top + plotH - (v / max * plotH));
+  });
+  ctx.lineTo(pad.left + (sliced.length-1) * step, h - pad.bottom);
+  ctx.closePath();
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  ctx.beginPath();
+  sliced.forEach((v, i) => {
+    const x = pad.left + i * step;
+    const y = pad.top + plotH - (v / max * plotH);
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  });
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  sliced.forEach((v, i) => {
+    const x = pad.left + i * step;
+    const y = pad.top + plotH - (v / max * plotH);
+    ctx.beginPath(); ctx.arc(x, y, 2.5, 0, Math.PI * 2);
+    ctx.fillStyle = color; ctx.fill();
+    ctx.strokeStyle = '#0c0f1e'; ctx.lineWidth = 1; ctx.stroke();
+  });
+
+  canvas._chartData = { sliced, max, step, pad, plotH, color, label: label || '' };
 }
 
 async function refreshMetrics() {
@@ -408,6 +517,7 @@ function addLog(msg) {
   list.innerHTML = '<div>[' + time + '] ' + escapeHtml(msg) + '</div>' + list.innerHTML;
   while (list.children.length > 100) list.removeChild(list.lastChild);
 }
+function clearLog() { document.getElementById('logList').innerHTML = ''; }
 
 async function loadSlots() {
   const data = await apiGet('/api/admin/slots');
@@ -532,6 +642,21 @@ async function rejectAi(idx) {
   pendingAiSoups.splice(idx, 1);
   renderAiPending();
 }
+async function approveAllAi() {
+  if (!confirm('确认全部入库 ' + pendingAiSoups.length + ' 道题？')) return;
+  const soups = [...pendingAiSoups];
+  for (const s of soups) { await apiPost('/api/admin/ai-approve', {soup: s}); }
+  pendingAiSoups = [];
+  renderAiPending();
+  addLog('批量入库 ' + soups.length + ' 道题');
+}
+async function rejectAllAi() {
+  if (!confirm('确认全部废弃 ' + pendingAiSoups.length + ' 道题？')) return;
+  const c = pendingAiSoups.length;
+  pendingAiSoups = [];
+  renderAiPending();
+  addLog('批量废弃 ' + c + ' 道题');
+}
 
 async function apiGet(path) {
   try {
@@ -568,6 +693,31 @@ document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () =>
     metricsTimer = null;
   }
 }));
+
+// 鼠标悬停 tooltip（admin 数据 tab 图表）
+document.addEventListener('mousemove', function(e) {
+  ['adminDanmakuChart','adminGiftChart'].forEach(cid => {
+    const canvas = document.getElementById(cid);
+    const tid = cid === 'adminDanmakuChart' ? 'adminDanmakuTooltip' : 'adminGiftTooltip';
+    const tooltip = document.getElementById(tid);
+    if (!canvas || !tooltip || !canvas._chartData) { if(tooltip) tooltip.style.display = 'none'; return; }
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    const d = canvas._chartData;
+    if (mx < 0 || mx > rect.width || my < 0 || my > rect.height) { tooltip.style.display = 'none'; return; }
+    const idx = Math.round((mx - d.pad.left) / d.step);
+    if (idx < 0 || idx >= d.sliced.length) { tooltip.style.display = 'none'; return; }
+    const val = d.sliced[idx];
+    tooltip.style.display = 'block';
+    tooltip.style.left = (d.pad.left + idx * d.step + 8) + 'px';
+    tooltip.style.top = Math.max(0, d.pad.top + d.plotH - (val / d.max * d.plotH) - 30) + 'px';
+    tooltip.textContent = val + (d.label ? ' ' + d.label : '');
+  });
+});
+
+// 每分钟刷新游戏面板统计（局数/时长）
+setInterval(refreshMetrics, 60000);
 
 // 启动
 connect();

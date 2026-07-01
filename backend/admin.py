@@ -109,6 +109,14 @@ textarea{width:100%;min-height:80px;resize:vertical}
 .metric-card .val{font-size:24px;font-weight:900;color:#00d4ff}
 .metric-card .val.gold{color:#fbbf24}
 .metric-card .val.green{color:#22c55e}
+.theme-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:8px}
+.theme-card{background:rgba(0,0,0,0.3);border:2px solid rgba(255,255,255,0.06);border-radius:10px;padding:14px;cursor:pointer;transition:all 0.2s}
+.theme-card:hover{border-color:rgba(0,212,255,0.4);transform:translateY(-2px)}
+.theme-card.active{border-color:#00d4ff;box-shadow:0 0 20px rgba(0,212,255,0.3)}
+.theme-card .preview{height:60px;border-radius:6px;margin-bottom:8px;border:1px solid rgba(255,255,255,0.05)}
+.theme-card .name{font-size:14px;font-weight:700;color:#e2e8f0;margin-bottom:4px}
+.theme-card .accent{display:inline-block;width:12px;height:12px;border-radius:50%;margin-right:6px;vertical-align:middle}
+.theme-card .btn{margin-top:8px;width:100%}
 </style>
 </head>
 <body>
@@ -129,6 +137,7 @@ textarea{width:100%;min-height:80px;resize:vertical}
     <div class="tab" data-tab="soup">📚 题库管理</div>
     <div class="tab" data-tab="ai">🤖 AI 出题</div>
     <div class="tab" data-tab="data">📈 数据</div>
+    <div class="tab" data-tab="theme">🎨 主题</div>
   </div>
 
   <!-- 游戏控制 -->
@@ -229,6 +238,14 @@ textarea{width:100%;min-height:80px;resize:vertical}
       <div class="soup-list" id="recentGifts"></div>
     </div>
   </div>
+
+  <!-- 主题 -->
+  <div class="tab-content" id="tab-theme">
+    <div class="section">
+      <h2>当前主题</h2>
+      <div id="themeGrid" class="theme-grid"></div>
+    </div>
+  </div>
 </div>
 
 <!-- 礼物选择器 -->
@@ -291,6 +308,7 @@ function handleMessage(msg) {
     case 'hint': addLog('💡 提示: ' + (msg.hint||'')); break;
     case 'slots_updated': loadSlots(); break;
     case 'metrics_update': updateMetrics(msg.metrics); break;
+    case 'theme_change': loadThemes(); break;
   }
 }
 
@@ -540,6 +558,7 @@ document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () =>
   document.getElementById('tab-'+t.dataset.tab).classList.add('active');
   if (t.dataset.tab==='slots') loadSlots();
   if (t.dataset.tab==='soup') loadSoupList();
+  if (t.dataset.tab==='theme') loadThemes();
   // 数据 tab 启动轮询
   if (t.dataset.tab==='data') {
     refreshMetrics();
@@ -553,6 +572,34 @@ document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () =>
 // 启动
 connect();
 refreshDiffGrid();
+
+async function loadThemes() {
+  const data = await apiGet('/api/admin/themes');
+  const grid = document.getElementById('themeGrid');
+  if (!data.themes) return;
+  const current = await apiGet('/api/theme');
+  grid.innerHTML = data.themes.map(t => {
+    const isActive = t.id === current.theme_id;
+    return '<div class="theme-card' + (isActive ? ' active' : '') + '" data-theme-id="' + escapeHtml(t.id) + '">' +
+      '<div class="preview" style="background:' + t.preview + '"></div>' +
+      '<div class="name"><span class="accent" style="background:' + t.accent + '"></span>' + escapeHtml(t.name) + (isActive ? ' ✓' : '') + '</div>' +
+      '<button class="btn btn-primary btn-sm">应用</button>' +
+      '</div>';
+  }).join('');
+  grid.querySelectorAll('.theme-card').forEach(card => {
+    card.addEventListener('click', () => applyTheme(card.dataset.themeId));
+  });
+}
+
+async function applyTheme(id) {
+  const res = await apiPost('/api/admin/theme', {theme_id: id});
+  if (res.ok) {
+    addLog('🎨 主题已切换: ' + id);
+    loadThemes();
+  } else {
+    addLog('❌ 主题切换失败: ' + (res.error || ''));
+  }
+}
 </script>
 </body>
 </html>"""

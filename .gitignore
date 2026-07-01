@@ -1,0 +1,62 @@
+﻿# Node
+node_modules/
+dist/
+.next/
+*.tsbuildinfo
+
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.env
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+vite-out.log
+
+# Model files (use API instead of local)
+models/
+*.gguf
+*.safetensors
+*.bin
+
+# Meoo
+meoo_files.json
+meoo_screenshot_*.png
+
+# Temp / debug scripts
+_temp_*.py
+_verify*.py
+_check*.py
+_fix*.py
+_test*.py
+_debug*.py
+_gen*.py
+_make*.py
+_mod*.py
+_patch*.py
+_insert*.py
+_temp.py
+_verify.py
+
+# Screenshots
+game_*.png
+screenshot*.png
+
+# Build artifacts
+build/
+*.spec
+
+# Playwright
+.playwright-mcp/

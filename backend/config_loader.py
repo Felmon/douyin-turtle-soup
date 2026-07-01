@@ -39,6 +39,7 @@ class ConfigLoader:
 
             # 游戏参数
             "ANTI_STALL_INTERVAL": int(os.getenv("ANTI_STALL_INTERVAL", "180")),
+            "ANTI_STALL_MIN": int(os.getenv("ANTI_STALL_MIN", "30")),
             "ANTI_STALL_DANMAKU": int(os.getenv("ANTI_STALL_DANMAKU", "50")),
             "ANTI_STALL_DECAY": float(os.getenv("ANTI_STALL_DECAY", "0.8")),
 

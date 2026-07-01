@@ -24,9 +24,13 @@ class DouyinBridge:
 
     def __init__(self, live_ws_url: str = "ws://localhost:1088",
                  server_push_url: str = "http://localhost:3010/api/barrage/push",
+                 server_gift_push_url: str | None = None,
                  reconnect_delay: float = 3.0):
         self.live_ws_url = live_ws_url
         self.server_push_url = server_push_url
+        self.server_gift_push_url = server_gift_push_url or server_push_url.replace(
+            "/api/barrage/push", "/api/gift/push"
+        )
         self.reconnect_delay = reconnect_delay
         self._running = False
         self._task: asyncio.Task | None = None
@@ -93,22 +97,22 @@ class DouyinBridge:
                     "count": data.get("gift", {}).get("count", 1),
                 }
             elif msg_type in ("like", "member", "follow"):
-                payload = {
-                    "type": msg_type,
-                    "user": data.get("user", {}).get("nickname", "观众"),
-                    "count": data.get("count", 1),
-                }
+                # 这些类型没有 content 字段，无法推送到 /api/barrage/push
+                self._stats["forwarded"] += 1
+                return
             else:
                 return  # 不处理未知类型
 
             if self._http_client and payload:
+                target_url = self.server_gift_push_url if msg_type == "gift" else self.server_push_url
                 resp = await self._http_client.post(
-                    self.server_push_url,
+                    target_url,
                     json=payload,
                 )
                 if resp.status_code == 200:
                     self._stats["forwarded"] += 1
                 else:
+                    self._stats["errors"] += 1
                     print(f"[DouyinBridge] 转发失败: {resp.status_code}")
         except json.JSONDecodeError:
             pass  # 非JSON消息忽略

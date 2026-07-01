@@ -34,11 +34,11 @@ def classify_by_length(bottom: str) -> Optional[str]:
     """根据汤底字数自动归类难度。"""
     n = _count_chars(bottom)
     for diff_id, cfg in DIFFICULTY_CONFIG.items():
-        if cfg["min_len"] <= n <= cfg["max_len"]:
+        if cfg["min_len"] <= n < cfg["max_len"]:
             return diff_id
     if n < 30:
         return "easy"  # 太短也归简单
-    if n > 150:
+    if n >= 150:
         return "void"  # 太长归无人区
     return None
 

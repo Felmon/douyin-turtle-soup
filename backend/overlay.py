@@ -618,6 +618,7 @@ body{
 
   <!-- 底部 -->
   <div class="bottom-area fade-in">
+    <div class="answer-bubbles" id="answerBubbles"></div>
     <div class="danmaku-panel">
       <div class="danmaku-header">
         <span class="danmaku-label">💬 弹幕</span>
@@ -692,10 +693,11 @@ function handleMessage(msg) {
     case 'game_start':
       document.getElementById('surfaceText').textContent = msg.surface || '';
       document.getElementById('diffBadge').textContent = msg.difficulty_name || '';
-      setPhase('playing');
+      setPhase(msg.phase || 'playing');
       renderCharStates(msg.charStates);
       updateProgress(msg.charStates);
       clearDanmaku();
+      document.getElementById('answerBubbles').innerHTML = '';
       // 朗读汤面
       speakText('汤面：' + (msg.surface || ''), 8000);
       break;
@@ -708,7 +710,7 @@ function handleMessage(msg) {
       break;
     case 'classification':
       addDanmakuItem(msg);
-      updateQA(msg.answerType);
+      updateQA(msg);
       break;
     case 'hint':
       showHint(msg.hint || msg.script || '', msg.autoHide);
@@ -717,6 +719,7 @@ function handleMessage(msg) {
       handleGiftEffect(msg);
       break;
     case 'game_end':
+      document.getElementById('float-layer').innerHTML = '';
       setPhase('complete');
       renderCharStates(msg.charStates);
       updateProgress(msg.charStates);
@@ -727,6 +730,15 @@ function handleMessage(msg) {
       break;
     case 'tier_up':
       showTierUp(msg);
+      break;
+    case 'difficulty_scheduled':
+      if (msg.nextDifficultyName) {
+        const badge = document.getElementById('diffBadge');
+        const oldText = badge.textContent;
+        badge.textContent = '⏭ ' + msg.nextDifficultyName;
+        badge.style.boxShadow = '0 0 20px rgba(0,212,255,0.6)';
+        setTimeout(() => { badge.textContent = oldText; badge.style.boxShadow = ''; }, 6000);
+      }
       break;
     case 'score_update':
       // 由 metrics_update 统一刷新
@@ -777,7 +789,10 @@ function flashChar(ch, isAntiStall) {
   boxes.forEach(b => {
     b.classList.add('highlight');
     if (isAntiStall) b.style.boxShadow = '0 0 30px var(--red)';
-    setTimeout(() => b.classList.remove('highlight'), 1500);
+    setTimeout(() => {
+      b.classList.remove('highlight');
+      if (isAntiStall) b.style.boxShadow = '';
+    }, 2000);
   });
 }
 
@@ -838,11 +853,19 @@ function updateQACount() {
   document.getElementById('infoQA').textContent = count;
 }
 
-function updateQA(answerType) {
-  // 同步增加答题气泡
-  if (answerType === 'hint') return;
-  // 不在弹幕流里发，但可以在左侧气泡显示（从最近一条弹幕里取）
-  // 这里省略以避免重复
+function updateQA(msg) {
+  if (!msg || msg.answerType === 'hint') return;
+  const container = document.getElementById('answerBubbles');
+  if (!container) return;
+  const bubble = document.createElement('div');
+  const cls = msg.answerType === '是' ? 'yes' : msg.answerType === '不是' ? 'no' : 'maybe';
+  const label = msg.answerType === '是' ? '是的' : msg.answerType === '不是' ? '不是' : '是也不是';
+  bubble.className = 'answer-bubble ' + cls;
+  bubble.innerHTML = '<span class="name">' + escapeHtml(msg.user||'观众') + '</span><span class="ans">' + label + '</span>';
+  container.appendChild(bubble);
+  setTimeout(() => { if (bubble.parentNode) bubble.remove(); }, 5000);
+  // 限制气泡数量
+  while (container.children.length > 20) container.removeChild(container.firstChild);
 }
 
 function clearDanmaku() {
@@ -873,12 +896,6 @@ function showGiftBubble(name, user, coins) {
   div.innerHTML = '<span class="icon">🎁</span><span class="text"><b>' + escapeHtml(user) + '</b> 送 ' + escapeHtml(name) + (coins>0?' ('+coins+'抖币)':'') + '</span>';
   layer.appendChild(div);
   setTimeout(() => div.remove(), 3500);
-  // 同时飞屏提示（小礼物也飞）
-  const fly = document.createElement('div');
-  fly.className = 'gift-fly';
-  fly.innerHTML = '<div class="icon-wrap"><div class="icon">🎁</div></div><div class="name">' + escapeHtml(name) + '</div><div class="user">感谢 ' + escapeHtml(user) + '</div>';
-  layer.appendChild(fly);
-  setTimeout(() => fly.remove(), 4000);
 }
 
 function showFullscreenGift(name, user, coins) {
@@ -917,6 +934,7 @@ let tierUpTimer = null;
 function showTierUp(msg) {
   if (tierUpTimer) clearTimeout(tierUpTimer);
   const layer = document.getElementById('float-layer');
+  const old = layer.querySelector('.tier-up'); if(old) old.remove();
   const tier = msg.to_tier || {};
   const div = document.createElement('div');
   div.className = 'tier-up';
@@ -975,15 +993,20 @@ function setPhase(phase) {
 function updateStats(stats) {
   if (!stats) return;
   if (stats.viewers !== undefined) document.getElementById('infoViewers').textContent = stats.viewers;
-  if (stats.tier_dist) {
-    // 段位分布 -> 排行榜
-    const list = Object.entries(stats.tier_dist)
-      .filter(([k,v]) => v > 0)
-      .sort((a,b) => b[1] - a[1])
-      .slice(0,5)
-      .map(([k,v], i) => ({rank: i+1, name: k + '段位', tier: v + '人', score: ''}));
+  // 排行榜以 API 轮询为准（见 setInterval）
+}
+
+async function refreshLeaderboard() {
+  try {
+    const data = await (await fetch('/api/leaderboard?limit=5')).json();
+    const list = (data.leaderboard || []).map((u,i) => ({
+      rank: i+1,
+      name: u.name || '',
+      tier: u.tier || '',
+      score: u.score || 0,
+    }));
     renderTierList(list);
-  }
+  } catch(e) {}
 }
 
 function renderTierList(list) {
@@ -1043,6 +1066,8 @@ function escapeHtml(s) {
 // 启动
 // ══════════════════════════════════════════
 connect();
+refreshLeaderboard();
+setInterval(refreshLeaderboard, 10000);
 </script>
 </body>
 </html>"""

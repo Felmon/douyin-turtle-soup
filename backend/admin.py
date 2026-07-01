@@ -280,12 +280,48 @@ function connect() {
 function handleMessage(msg) {
   switch(msg.type) {
     case 'state_sync': updateGameState(msg.room); break;
-    case 'game_start': updateGameState({surface: msg.surface, charStates: msg.charStates, difficulty: msg.difficulty}); break;
+    case 'game_start': updateGameState({surface: msg.surface, charStates: msg.charStates, difficulty: msg.difficulty, phase: msg.phase || 'reading'}); break;
     case 'reveal_update': updateCharStates(msg.charStates); break;
     case 'game_end': document.getElementById('statusInfo').textContent='● 已结束'; break;
+    case 'difficulty_scheduled': if(msg.nextDifficulty) updateGameState({difficulty: msg.nextDifficulty}); break;
     case 'classification': addLog(msg.user + ': ' + msg.text + ' -> ' + msg.answerType); break;
     case 'gift_effect': addLog('🎁 ' + msg.user + '送了' + msg.giftName); break;
+    case 'tier_up': addLog('⬆ ' + msg.user + ' 升级到 ' + (msg.to_tier?.name||'')); break;
+    case 'score_update': addLog('📊 ' + msg.user + ' 积分: ' + msg.score); break;
+    case 'hint': addLog('💡 提示: ' + (msg.hint||'')); break;
+    case 'slots_updated': loadSlots(); break;
+    case 'metrics_update': updateMetrics(msg.metrics); break;
   }
+}
+
+let metricsTimer = null;
+
+function updateMetrics(m) {
+  if (!m) return;
+  document.getElementById('mTotalScore').textContent = m.totalScore ?? 0;
+  document.getElementById('mTotalDanmaku').textContent = m.totalDanmaku ?? 0;
+  document.getElementById('mTotalGifts').textContent = m.totalGifts ?? 0;
+  document.getElementById('mPaidUsers').textContent = m.paid_users ?? 0;
+  // 最近礼物列表
+  const list = document.getElementById('recentGifts');
+  if (m.recentGifts && m.recentGifts.length > 0) {
+    list.innerHTML = m.recentGifts.map(g =>
+      '<div style="padding:6px 10px;background:rgba(0,0,0,0.2);border-radius:6px;margin-bottom:4px;font-size:12px;display:flex;justify-content:space-between">' +
+      '<span>' + escapeHtml(g.user) + '</span>' +
+      '<span>' + escapeHtml(g.gift_name) + '</span>' +
+      '<span style="color:#fbbf24">' + (g.coins||0) + '抖币</span>' +
+      '</div>'
+    ).join('');
+  } else {
+    list.innerHTML = '<div class="empty">暂无礼物记录</div>';
+  }
+}
+
+async function refreshMetrics() {
+  try {
+    const data = await apiGet('/api/admin/metrics');
+    updateMetrics(data);
+  } catch(e) {}
 }
 
 function updateGameState(state) {
@@ -377,13 +413,18 @@ function editSlot(slotId) {
   document.getElementById('giftPicker').style.display = 'flex';
   searchGifts('');
 }
+// 礼物选择器使用事件委托代替 onclick（防XSS）
+document.getElementById('giftPickerBody').addEventListener('click', function(e) {
+  const item = e.target.closest('.gift-item');
+  if (item && item.dataset.giftName) pickGift(item.dataset.giftName);
+});
 function closePicker() { document.getElementById('giftPicker').style.display = 'none'; currentSlotEditing = null; }
 
 async function searchGifts(query) {
   const data = await apiGet('/api/admin/gifts/search?q=' + encodeURIComponent(query));
   const body = document.getElementById('giftPickerBody');
   body.innerHTML = (data.gifts || []).map(g =>
-    '<div class="gift-item" onclick="pickGift(\''+g.name.replace(/'/g,"\\'")+'\')">' +
+    '<div class="gift-item" data-gift-name="' + escapeHtml(g.name) + '">' +
     '<div class="icon" style="background-image:url('+ (g.icon||'') +')"></div>' +
     '<div class="name">' + escapeHtml(g.name) + '</div>' +
     '<div class="price">' + g.coins + '抖币</div>' +
@@ -475,12 +516,18 @@ async function rejectAi(idx) {
 }
 
 async function apiGet(path) {
-  const r = await fetch(path);
-  return await r.json();
+  try {
+    const r = await fetch(path);
+    if (!r.ok) return {};
+    return await r.json();
+  } catch(e) { return {}; }
 }
 async function apiPost(path, body) {
-  const r = await fetch(path, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
-  return await r.json();
+  try {
+    const r = await fetch(path, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+    if (!r.ok) return {};
+    return await r.json();
+  } catch(e) { return {}; }
 }
 
 function escapeHtml(s) { if(!s) return ''; const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
@@ -493,6 +540,14 @@ document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () =>
   document.getElementById('tab-'+t.dataset.tab).classList.add('active');
   if (t.dataset.tab==='slots') loadSlots();
   if (t.dataset.tab==='soup') loadSoupList();
+  // 数据 tab 启动轮询
+  if (t.dataset.tab==='data') {
+    refreshMetrics();
+    metricsTimer = setInterval(refreshMetrics, 5000);
+  } else if (metricsTimer) {
+    clearInterval(metricsTimer);
+    metricsTimer = null;
+  }
 }));
 
 // 启动

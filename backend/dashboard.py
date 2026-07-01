@@ -155,12 +155,22 @@ function scheduleReconnect() {
 
 function handleMessage(msg) {
   switch(msg.type) {
-    case 'state_sync': if (msg.metrics) updateMetrics(msg.metrics); break;
-    case 'metrics_update': updateMetrics(msg.metrics); break;
-    case 'score_update': refreshLeaderboard(); break;
-    case 'tier_up': refreshLeaderboard(); refreshTierDist(); break;
+    case 'state_sync':
+      if (msg.metrics) updateMetrics(msg.metrics);
+      else if (msg.room?.stats) updateMetrics(msg.room.stats);
+      break;
+    case 'metrics_update': if (msg.metrics) updateMetrics(msg.metrics); break;
+    case 'score_update': refreshMetrics(); refreshLeaderboard(); break;
+    case 'tier_up': refreshMetrics(); refreshLeaderboard(); refreshTierDist(); break;
   }
   document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
+}
+
+async function refreshMetrics() {
+  try {
+    const m = await (await fetch('/api/admin/metrics')).json();
+    updateMetrics(m);
+  } catch(e) {}
 }
 
 function updateMetrics(m) {
@@ -209,8 +219,8 @@ function drawChart(id, data, color) {
   const ctx = canvas.getContext('2d');
   const dpr = window.devicePixelRatio || 1;
   const rect = canvas.getBoundingClientRect();
-  canvas.width = rect.width * dpr;
-  canvas.height = rect.height * dpr;
+  canvas.width = Math.round(rect.width * dpr);
+  canvas.height = Math.round(rect.height * dpr);
   ctx.scale(dpr, dpr);
   const w = rect.width, h = rect.height;
   ctx.clearRect(0,0,w,h);
@@ -238,13 +248,15 @@ function drawChart(id, data, color) {
 
 function escapeHtml(s) { if(!s) return ''; const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
 
-function refreshLeaderboard() { fetch('/api/leaderboard?limit=10').then(r=>r.json()).then(d=>{ if(d.leaderboard) updateLeaderboard(d.leaderboard); }); }
-function refreshTierDist() { fetch('/api/admin/tier-dist').then(r=>r.json()).then(d=>{ if(d.dist) updateTierDist(d.dist); }); }
+function refreshLeaderboard() { fetch('/api/leaderboard?limit=10').then(r=>r.json()).then(d=>{ if(d.leaderboard) updateLeaderboard(d.leaderboard); }).catch(()=>{}); }
+function refreshTierDist() { fetch('/api/admin/tier-dist').then(r=>r.json()).then(d=>{ if(d.dist) updateTierDist(d.dist); }).catch(()=>{}); }
 function exportData() { window.open('/api/admin/export?format=json', '_blank'); }
 function resetSession() { if(confirm('确认重置当前会话统计？')) fetch('/api/admin/reset-session', {method:'POST'}); }
 
 // 启动
 connect();
+refreshMetrics();
+setInterval(refreshMetrics, 5000);
 setInterval(refreshLeaderboard, 10000);
 setInterval(refreshTierDist, 30000);
 </script>

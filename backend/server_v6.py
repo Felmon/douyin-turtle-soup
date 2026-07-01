@@ -30,7 +30,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
-from openai import OpenAI
+from openai import AsyncOpenAI
 
 # v6 模块
 from config_loader import config
@@ -44,10 +44,10 @@ from tiers import TIERS, get_tier, check_tier_up, SCORE_BY_DIFFICULTY
 
 # ── 全局 LLM 客户端（懒加载） ──
 _client = None
-def get_client() -> OpenAI:
+def get_client() -> AsyncOpenAI:
     global _client
     if _client is None:
-        _client = OpenAI(
+        _client = AsyncOpenAI(
             api_key=config.get("LLM_API_KEY", ""),
             base_url=config.get("LLM_BASE_URL", "https://api.deepseek.com"),
             timeout=20.0,
@@ -115,7 +115,7 @@ def db_query(sql: str, params: tuple = ()) -> list[dict]:
 GIFT_ALIASES = {
     "点赞": "like", "小心心": "like", "为你点赞": "like", "棒棒": "like",
     "粉丝灯牌": "fan_light", "粉丝团灯牌": "fan_light", "灯牌": "fan_light",
-    "人气票": "popularity", "玫瑰": "popularity", "鲜花": "popularity", "小心心": "popularity",
+    "人气票": "popularity", "玫瑰": "popularity", "鲜花": "popularity",
     "啤酒": "beer", "大啤酒": "beer",
     "棒棒糖": "lollipop",
     "墨镜": "sunglasses",
@@ -127,6 +127,10 @@ def resolve_gift_to_slot(gift_name: str) -> str | None:
     slot_id = slot_manager.resolve_gift(gift_name)
     if slot_id:
         return slot_id
+    # 兜底：别名映射（如 "点赞" → "like" → 槽位）
+    alias_key = GIFT_ALIASES.get(gift_name)
+    if alias_key:
+        return slot_manager.resolve_gift(alias_key)
     return None
 
 
@@ -244,7 +248,7 @@ class GameRoom:
         target_len = 30  # 30个点（30分钟）
         key = "danmaku_series" if kind == "danmaku" else "gift_series"
         series = self.stats[key]
-        # 补齐缺失的分钟
+        # 补齐缺失的分钟并滑动窗口
         while len(series) < min(elapsed, target_len):
             series.append(0)
         if elapsed < target_len:
@@ -252,10 +256,10 @@ class GameRoom:
                 series.append(0)
             series[-1] = series[-1] + value
         else:
-            # 滑动窗口
-            if not series:
-                series.append(0)
-            series[-1] = series[-1] + value
+            # 滑动窗口：移除最老条目，添加新桶
+            while len(series) >= target_len:
+                series.pop(0)
+            series.append(value)
 
 
 room = GameRoom()
@@ -309,7 +313,7 @@ class RevealEngine:
     def reveal_pct(states: list[dict], pct: float) -> list[dict]:
         """按百分比揭示未揭示的字。"""
         content_unrevealed = [s for s in states if s["isContent"] and not s["revealed"]]
-        n = int(len(content_unrevealed) * pct)
+        n = max(1, int(len(content_unrevealed) * pct))
         for s in content_unrevealed[:n]:
             s["revealed"] = True
         return states
@@ -327,7 +331,7 @@ async def llm_classify(text: str, answer: str, keywords: list[str]) -> str:
     """Track B: 是/不是/是也不是 三分类。"""
     try:
         client = get_client()
-        resp = client.chat.completions.create(
+        resp = await client.chat.completions.create(
             model=config.get("LLM_MODEL", "deepseek-v4-flash"),
             messages=[
                 {"role": "system", "content": "判断弹幕与汤底的相关性。只回复：是、不是、是也不是"},
@@ -337,6 +341,7 @@ async def llm_classify(text: str, answer: str, keywords: list[str]) -> str:
         )
         r = resp.choices[0].message.content.strip()
         if "是也不是" in r: return "是也不是"
+        if "不是" in r: return "不是"
         if "是" in r: return "是"
         return "不是"
     except Exception as e:
@@ -349,7 +354,7 @@ async def llm_hint(qa_history: list[dict], answer: str, keywords: list[str]) -> 
     try:
         client = get_client()
         history = "\n".join([f"Q: {h.get('question','')} -> {h.get('result','')}" for h in qa_history[-5:]])
-        resp = client.chat.completions.create(
+        resp = await client.chat.completions.create(
             model=config.get("LLM_MODEL", "deepseek-v4-flash"),
             messages=[
                 {"role": "system", "content": "生成方向引导提示。不超过20字。"},
@@ -375,7 +380,7 @@ async def llm_generate_soups(difficulty: str, count: int = 5) -> list[dict]:
 不要任何其他文字，只返回JSON。"""
     try:
         client = get_client()
-        resp = client.chat.completions.create(
+        resp = await client.chat.completions.create(
             model=config.get("LLM_MODEL", "deepseek-v4-flash"),
             messages=[{"role": "user", "content": prompt}],
             max_tokens=2000, temperature=0.9,
@@ -420,6 +425,8 @@ async def start_game(difficulty: str = "medium", soup_id: str | None = None):
         candidates = [s for s in SOUPS if s.get("difficulty") == diff]
         if not candidates:
             candidates = SOUPS
+        if not candidates:
+            return None
         soup = random.choice(candidates)
 
     # 应用难度切换
@@ -454,6 +461,15 @@ async def end_game(reveal: bool = True):
         for s in room.char_states:
             s["revealed"] = True
     room.phase = "complete"
+
+    # 记录本局历史
+    _, _, pct = RevealEngine.get_progress(room.char_states)
+    duration = time.time() - room.start_time if room.start_time else 0
+    db_execute(
+        "INSERT INTO round_history(soup_id, difficulty, winner, duration, reveal_pct, timestamp) VALUES(?,?,?,?,?,?)",
+        (room.soup_id, room.current_difficulty, "", duration, round(pct, 1), time.time()),
+    )
+
     await manager.broadcast({
         "type": "game_end",
         "charStates": room.char_states,
@@ -618,7 +634,7 @@ async def add_score(user: str, delta: int):
         new_score = max(0, old_score + delta)
     else:
         old_score = 0
-        new_score = max(100, delta)  # 新用户默认100
+        new_score = max(0, delta)  # 新用户初始分=实际得分
     new_tier = get_tier(new_score)
     db_execute(
         "INSERT INTO users(name, score, tier, last_seen) VALUES(?,?,?,?) "
@@ -646,8 +662,8 @@ async def anti_stall_loop():
                 continue
             now = time.time()
             decay = config.get("ANTI_STALL_DECAY", 0.8) ** room.anti_triggers
-            interval = config.get("ANTI_STALL_INTERVAL", 180) * decay
-            danmaku_thresh = config.get("ANTI_STALL_DANMAKU", 50) * decay
+            interval = max(config.get("ANTI_STALL_MIN", 30), config.get("ANTI_STALL_INTERVAL", 180) * decay)
+            danmaku_thresh = max(config.get("ANTI_STALL_MIN", 30), config.get("ANTI_STALL_DANMAKU", 50) * decay)
             time_cond = (now - room.anti_last_reveal) >= interval
             danmaku_cond = room.anti_since_reveal >= danmaku_thresh
             if time_cond or danmaku_cond:
@@ -675,7 +691,7 @@ async def anti_stall_loop():
                         "user": "系统",
                         "hint": f"防卡死自动揭示：{target}",
                         "script": f"⏰ 自动揭示: {target}",
-                        "autoHide": 60,
+                        "autoHide": 60000,
                     })
         except Exception as e:
             print(f"[AntiStall] error: {e}")
@@ -692,6 +708,7 @@ async def start_dy_bridge():
         dy_bridge = DouyinBridge(
             live_ws_url=config.get("LIVE_WS_URL", "ws://localhost:1088"),
             server_push_url=f"http://127.0.0.1:{config.get('SERVER_PORT', 3010)}/api/barrage/push",
+            server_gift_push_url=f"http://127.0.0.1:{config.get('SERVER_PORT', 3010)}/api/gift/push",
         )
         await dy_bridge.start()
     except Exception as e:
@@ -701,10 +718,18 @@ async def start_dy_bridge():
 # ── FastAPI App ──
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    asyncio.create_task(anti_stall_loop())
-    asyncio.create_task(start_dy_bridge())
+    tasks = [
+        asyncio.create_task(anti_stall_loop()),
+        asyncio.create_task(start_dy_bridge()),
+    ]
     print(f"[Server] v6 已启动: http://localhost:{config.get('SERVER_PORT', 3010)}")
     yield
+    # 关机清理
+    for t in tasks:
+        t.cancel()
+    await asyncio.gather(*tasks, return_exceptions=True)
+    if dy_bridge:
+        await dy_bridge.stop()
 
 
 app = FastAPI(title="海龟汤 v6", lifespan=lifespan)
@@ -732,12 +757,19 @@ async def overlay_page():
 # ── 健康检查 ──
 @app.get("/health")
 async def health():
+    bridge_stats = {}
+    if dy_bridge:
+        try:
+            bridge_stats = dy_bridge.get_stats()
+        except Exception:
+            pass
     return {
         "status": "ok", "version": "v6",
         "mode": config.get("V6_MODE", "self_hosted"),
         "phase": room.phase,
         "connections": manager.get_count(),
         "llm_model": config.get("LLM_MODEL", ""),
+        "bridge": bridge_stats,
     }
 
 
@@ -750,7 +782,10 @@ async def websocket_endpoint(ws: WebSocket):
     try:
         while True:
             raw = await ws.receive_text()
-            msg = json.loads(raw)
+            try:
+                msg = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
             t = msg.get("type", "")
             if t == "danmaku":
                 await handle_danmaku(msg)
@@ -764,6 +799,8 @@ async def websocket_endpoint(ws: WebSocket):
             elif t == "ping":
                 await ws.send_json({"type": "pong"})
     except WebSocketDisconnect:
+        pass
+    finally:
         manager.disconnect(cid)
 
 
@@ -806,6 +843,8 @@ class StartGameReq(BaseModel):
 @app.post("/api/game/start")
 async def game_start(req: StartGameReq):
     soup = await start_game(difficulty=req.difficulty, soup_id=req.soup_id)
+    if not soup:
+        return {"ok": False, "error": "题库为空，无法开局"}
     return {"ok": True, "soup_id": soup.get("id", "")}
 
 class DifficultyReq(BaseModel):
@@ -853,6 +892,12 @@ async def assign_slot(req: AssignSlotReq):
 @app.get("/api/admin/gifts/search")
 async def search_gifts(q: str = ""):
     return {"gifts": slot_manager.search_gifts(q)}
+
+@app.post("/api/admin/reset-session")
+async def reset_session():
+    room.reset()
+    await manager.broadcast({"type": "state_sync", "room": room.to_dict()})
+    return {"ok": True}
 
 
 # ── HTTP API: 题库 ──
@@ -962,6 +1007,17 @@ async def tier_dist():
 @app.get("/api/admin/metrics")
 async def admin_metrics():
     s = room.stats
+    recent = db_query("SELECT * FROM gift_log ORDER BY timestamp DESC LIMIT 10")
+    score_rows = db_query("SELECT score FROM users WHERE score > 0 LIMIT 1000")
+    gift_count_rows = db_query("SELECT COUNT(*) as cnt FROM gift_log")
+    paid_rows = db_query("SELECT DISTINCT user as cnt FROM gift_log")
+    total_gifts = gift_count_rows[0]["cnt"] if gift_count_rows else 0
+    paid_users = len(paid_rows) if paid_rows else 0
+    lb_rows = db_query("SELECT * FROM users ORDER BY score DESC LIMIT 10")
+    leaderboard = [
+        {"name": r.get("name", ""), "score": r.get("score", 0), "tier": r.get("tier", "黑铁")}
+        for r in lb_rows
+    ]
     return {
         "viewers": s["viewers"],
         "viewers_delta": 0,
@@ -970,12 +1026,17 @@ async def admin_metrics():
         "gift_rate": sum(g["count"] for g in s["gift_list"]) // max(1, int((time.time()-room._series_start)/60)),
         "gift_revenue": s["gift_revenue"],
         "pay_rate": 0,
-        "paid_users": len(set(g.get("user", "") for g in room.gift_log)),
+        "paid_users": paid_users,
         "danmaku_series": s["danmaku_series"],
         "gift_series": s["gift_series"],
-        "leaderboard": s["leaderboard"][:10],
+        "leaderboard": leaderboard,
         "gift_list": s["gift_list"],
         "tier_dist": s["tier_dist"],
+        # Admin data tab fields
+        "totalScore": sum(r.get("score", 0) for r in score_rows),
+        "totalDanmaku": s["danmaku_total"],
+        "totalGifts": total_gifts,
+        "recentGifts": [{"user": r.get("user", ""), "gift_name": r.get("gift_name", ""), "coins": r.get("coins", 0)} for r in recent],
     }
 
 @app.get("/api/admin/export")

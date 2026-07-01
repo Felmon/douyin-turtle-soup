@@ -5,7 +5,6 @@
   - ThemeManager: 实例方法操作 SQLite settings 表
   - apply_to_html: 在 <style>:root{} 块中插入 CSS 变量
 """
-import json
 import sqlite3
 import time
 from pathlib import Path

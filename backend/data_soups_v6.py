@@ -21,8 +21,6 @@ DIFFICULTY_CONFIG = {
     "void":   {"name": "无人区", "min_len": 120, "max_len": 150, "multiplier": 5.0},
 }
 
-# 兼容旧字段名
-DIFFICULTY_MULTIPLIER = {k: v["multiplier"] for k, v in DIFFICULTY_CONFIG.items()}
 
 
 def _count_chars(text: str) -> int:
@@ -168,11 +166,16 @@ SOUPS: List[Dict] = [
 ]
 
 # ── 启动时校验：每题的 difficulty 字段必须和汤底字数一致 ──
+import logging
+_log = logging.getLogger(__name__)
 for s in SOUPS:
     actual = classify_by_length(s['bottom'])
     if actual and actual != s.get('difficulty'):
         s['_auto_difficulty'] = actual
         s['_difficulty_mismatch'] = True
+        _log.warning("难度标签不一致: %s 标签=%s 实际=%s (字数=%d)",
+                     s.get('id') or s.get('title', '?'),
+                     s.get('difficulty'), actual, _count_chars(s['bottom']))
 
 # 难度名映射
 DIFFICULTY_NAME = {k: v["name"] for k, v in DIFFICULTY_CONFIG.items()}

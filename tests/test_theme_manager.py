@@ -61,3 +61,32 @@ def test_apply_to_html_invalid_id_returns_unchanged(tm):
     html = "<html><head><style>:root{}</style></head></html>"
     out = tm.apply_to_html(html, "hack")
     assert out == html
+
+
+def test_apply_persists_across_simulated_restart(tmp_path):
+    """模拟重启: set → 新实例 → get 验证持久化"""
+    from theme_manager import ThemeManager
+    db = str(tmp_path / "test.db")
+    a = ThemeManager(db_path=db)
+    for tid in ["dark", "starry", "festival", "dark"]:
+        a.set_active(tid)
+        b = ThemeManager(db_path=db)
+        assert b.get_active() == tid
+
+
+def test_apply_to_html_preserves_rest_of_document(tm):
+    """注入只改 :root，不破坏其他 HTML"""
+    html = "<html><head><style>:root{--old: red;}</style></head><body>其他</body></html>"
+    out = tm.apply_to_html(html, "festival")
+    assert "其他" in out
+    assert "--primary: #ef4444" in out
+    assert "--old" not in out  # 旧变量被覆盖
+
+
+def test_all_themes_have_consistent_var_keys():
+    """3 个主题必须有相同的 15 个 CSS 变量键（防缺漏）"""
+    from theme_manager import BUILTIN_THEMES
+    keys_per_theme = {tid: set(t["vars"].keys()) for tid, t in BUILTIN_THEMES.items()}
+    reference = keys_per_theme["dark"]
+    for tid, keys in keys_per_theme.items():
+        assert keys == reference, f"Theme {tid} missing vars: {reference - keys}"

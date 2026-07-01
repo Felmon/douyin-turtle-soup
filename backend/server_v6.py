@@ -252,7 +252,7 @@ class GameRoom:
         """记录时间序列（按分钟聚合）。"""
         now = time.time()
         elapsed = int((now - self._series_start) / 60)
-        target_len = 30  # 30个点（30分钟）
+        target_len = 240  # V7.2: 240个点（4小时）
         key = "danmaku_series" if kind == "danmaku" else "gift_series"
         series = self.stats[key]
         # 补齐缺失的分钟并滑动窗口
@@ -1031,6 +1031,13 @@ async def admin_metrics():
         {"name": r.get("name", ""), "score": r.get("score", 0), "tier": r.get("tier", "黑铁")}
         for r in lb_rows
     ]
+    # V7.2 新增指标
+    round_count_row = db_query("SELECT COUNT(*) as cnt FROM round_history")
+    round_count = round_count_row[0]["cnt"] if round_count_row else 0
+    session_duration = int(time.time() - room.start_time) if room.start_time else 0
+    total_qa = len(room.qa_history)
+    correct_qa = sum(1 for q in room.qa_history if q.get("result") in ("是", "是也不是"))
+    accuracy = round(correct_qa / total_qa * 100, 1) if total_qa > 0 else 0
     return {
         "viewers": s["viewers"],
         "viewers_delta": 0,
@@ -1045,6 +1052,9 @@ async def admin_metrics():
         "leaderboard": leaderboard,
         "gift_list": s["gift_list"],
         "tier_dist": s["tier_dist"],
+        "round_count": round_count,
+        "session_duration": session_duration,
+        "accuracy": accuracy,
         # Admin data tab fields
         "totalScore": sum(r.get("score", 0) for r in score_rows),
         "totalDanmaku": s["danmaku_total"],

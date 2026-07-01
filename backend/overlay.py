@@ -25,20 +25,7 @@ OVERLAY_HTML = r"""<!DOCTYPE html>
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;700;900&family=ZCOOL+KuaiLe&display=swap');
 
 :root {
-  --bg: #050714;
-  --bg-grad: linear-gradient(180deg,#0a0e26 0%,#1a0e3a 50%,#260e26 100%);
-  --card: rgba(12,16,38,0.88);
-  --card-border: rgba(255,255,255,0.08);
-  --primary: #00d4ff;
-  --gold: #fbbf24;
-  --green: #22c55e;
-  --red: #ef4444;
-  --yellow: #eab308;
-  --pink: #f472b6;
-  --purple: #a855f7;
-  --text: #f1f5f9;
-  --text-dim: #94a3b8;
-  --text-dimmer: #475569;
+  /* CSS 变量由服务端 theme_manager.apply_to_html() 注入 */
   /* 安全区: 中心 1080×1080 (1080 宽画面) */
   --safe-w: 100%;        /* 撑满 1080 宽 */
   --safe-h: 56.25vh;     /* 1080/1920 = 56.25% 高度, 也就是顶部 5%-56% 的可见区 */
@@ -749,6 +736,9 @@ function handleMessage(msg) {
       break;
     case 'metrics_update':
       if (msg.metrics) updateStats(msg.metrics);
+      break;
+    case 'theme_change':
+      location.reload();
       break;
   }
 }

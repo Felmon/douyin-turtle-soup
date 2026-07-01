@@ -68,6 +68,12 @@ canvas{width:100%!important;height:100%!important}
 .btn-ghost:hover{background:rgba(255,255,255,0.1)}
 
 .refresh-info{font-size:11px;color:#64748b;margin-left:auto}
+.chart-wrap{position:relative}
+.chart-tooltip{position:absolute;display:none;background:rgba(0,0,0,0.85);color:#e2e8f0;padding:6px 10px;border-radius:6px;font-size:11px;pointer-events:none;white-space:nowrap;z-index:10;border:1px solid rgba(255,255,255,0.1);backdrop-filter:blur(4px)}
+.time-range{display:flex;gap:4px;margin-bottom:6px}
+.time-btn{padding:2px 10px;border:1px solid rgba(255,255,255,0.1);border-radius:4px;background:transparent;color:#64748b;font-size:11px;cursor:pointer;transition:all 0.2s}
+.time-btn:hover{border-color:#00d4ff;color:#00d4ff}
+.time-btn.active{background:#00d4ff22;border-color:#00d4ff;color:#00d4ff}
 </style>
 </head>
 <body>
@@ -105,14 +111,49 @@ canvas{width:100%!important;height:100%!important}
     <div class="sub-metric"><span id="paidUsers">0</span> 位付费用户</div>
   </div>
 
-  <div class="card col-2">
-    <h3>📈 弹幕趋势 (最近30分钟)</h3>
-    <div class="chart-container"><canvas id="danmakuChart"></canvas></div>
+  <div class="card col-1">
+    <h3>本场局数</h3>
+    <div class="metric green" id="roundCount">0<span class="unit">局</span></div>
+  </div>
+
+  <div class="card col-1">
+    <h3>本场时长</h3>
+    <div class="metric" id="sessionDuration">00:00</div>
+  </div>
+
+  <div class="card col-1">
+    <h3>答对率</h3>
+    <div class="metric gold" id="accuracy">0<span class="unit">%</span></div>
   </div>
 
   <div class="card col-2">
-    <h3>🎁 礼物收入趋势</h3>
-    <div class="chart-container"><canvas id="giftChart"></canvas></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+      <h3 style="margin-bottom:0">📈 弹幕趋势</h3>
+      <div class="time-range" id="danmakuRange">
+        <button class="time-btn active" data-range="30">30分钟</button>
+        <button class="time-btn" data-range="60">1小时</button>
+        <button class="time-btn" data-range="240">4小时</button>
+      </div>
+    </div>
+    <div class="chart-wrap">
+      <canvas id="danmakuChart"></canvas>
+      <div class="chart-tooltip" id="danmakuTooltip"></div>
+    </div>
+  </div>
+
+  <div class="card col-2">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+      <h3 style="margin-bottom:0">🎁 礼物收入趋势</h3>
+      <div class="time-range" id="giftRange">
+        <button class="time-btn active" data-range="30">30分钟</button>
+        <button class="time-btn" data-range="60">1小时</button>
+        <button class="time-btn" data-range="240">4小时</button>
+      </div>
+    </div>
+    <div class="chart-wrap">
+      <canvas id="giftChart"></canvas>
+      <div class="chart-tooltip" id="giftTooltip"></div>
+    </div>
   </div>
 
   <div class="card col-2">
@@ -141,6 +182,7 @@ canvas{width:100%!important;height:100%!important}
 const wsUrl = (location.protocol==='https:'?'wss:':'ws:')+'//'+location.host+'/ws';
 let ws = null;
 let reconnectTimer = null;
+let chartState = { danmaku: { maxRange: 30 }, gift: { maxRange: 30 } };
 
 function connect() {
   if (ws) ws.close();
@@ -183,12 +225,18 @@ function updateMetrics(m) {
   document.getElementById('danmakuTotal').textContent = m.danmaku_total||0;
   document.getElementById('giftRevenue').textContent = m.gift_revenue||0;
   document.getElementById('paidUsers').textContent = m.paid_users||0;
+  document.getElementById('roundCount').innerHTML = (m.round_count||0) + '<span class="unit">局</span>';
+  const dur = m.session_duration || 0;
+  const mins = Math.floor(dur / 60);
+  const secs = dur % 60;
+  document.getElementById('sessionDuration').textContent = String(mins).padStart(2,'0') + ':' + String(secs).padStart(2,'0');
+  document.getElementById('accuracy').innerHTML = (m.accuracy||0) + '<span class="unit">%</span>';
 
   if (m.leaderboard) updateLeaderboard(m.leaderboard);
   if (m.gift_list) updateGiftList(m.gift_list);
   if (m.tier_dist) updateTierDist(m.tier_dist);
-  if (m.danmaku_series) drawChart('danmakuChart', m.danmaku_series, '#00d4ff');
-  if (m.gift_series) drawChart('giftChart', m.gift_series, '#fbbf24');
+  if (m.danmaku_series) drawChart('danmakuChart', m.danmaku_series, '#00d4ff', '条/分');
+  if (m.gift_series) drawChart('giftChart', m.gift_series, '#fbbf24', '抖币/分');
 }
 
 function updateLeaderboard(list) {
@@ -209,11 +257,13 @@ function updateGiftList(list) {
 
 function updateTierDist(dist) {
   const container = document.getElementById('tierDist');
-  const tiers = ['黑铁','青铜','黄金','铂金','钻石','白银','王者','宗师','大师','超级王者'];
-  container.innerHTML = tiers.map(t => '<div class="td-item"><span class="num">' + (dist[t]||0) + '</span><span class="label">' + t + '</span></div>').join('');
+  if (!dist || Object.keys(dist).length === 0) { container.innerHTML = '<div style="text-align:center;color:#64748b;padding:16px;font-size:12px">暂无数据</div>'; return; }
+  container.innerHTML = Object.entries(dist).map(([tier, count]) =>
+    '<div class="td-item"><span class="num">' + count + '</span><span class="label">' + tier + '</span></div>'
+  ).join('');
 }
 
-function drawChart(id, data, color) {
+function drawChart(id, data, color, label) {
   const canvas = document.getElementById(id);
   if (!canvas) return;
   const ctx = canvas.getContext('2d');
@@ -223,28 +273,123 @@ function drawChart(id, data, color) {
   canvas.height = Math.round(rect.height * dpr);
   ctx.scale(dpr, dpr);
   const w = rect.width, h = rect.height;
-  ctx.clearRect(0,0,w,h);
-  if (!data || data.length < 2) { ctx.fillStyle='#64748b'; ctx.font='12px sans-serif'; ctx.fillText('等待数据...',10,h/2); return; }
-  const max = Math.max(...data, 1);
-  const step = w / (data.length - 1);
+  ctx.clearRect(0, 0, w, h);
+
+  const rangeKey = id === 'danmakuChart' ? 'danmaku' : 'gift';
+  const maxRange = (chartState[rangeKey] || {}).maxRange || 30;
+  const sliced = data ? data.slice(-maxRange) : [];
+  if (!sliced || sliced.length < 2) {
+    ctx.fillStyle = '#64748b'; ctx.font = '12px sans-serif';
+    ctx.textAlign = 'center'; ctx.fillText('等待数据...', w/2, h/2);
+    canvas._chartData = null;
+    return;
+  }
+
+  const max = Math.max(...sliced, 1);
+  const pad = { top: 8, right: 8, bottom: 16, left: 36 };
+  const plotW = w - pad.left - pad.right;
+  const plotH = h - pad.top - pad.bottom;
+  const step = plotW / (sliced.length - 1);
+
+  // Y轴网格线 + 标签
+  ctx.textAlign = 'right';
+  ctx.font = '10px sans-serif';
+  ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+  ctx.lineWidth = 1;
+  ctx.fillStyle = '#64748b';
+  const ySteps = 4;
+  for (let i = 0; i <= ySteps; i++) {
+    const y = pad.top + (plotH / ySteps) * i;
+    const val = Math.round(max - (max / ySteps) * i);
+    ctx.beginPath();
+    ctx.setLineDash([3, 3]);
+    ctx.moveTo(pad.left, y);
+    ctx.lineTo(w - pad.right, y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillText(val, pad.left - 4, y + 3);
+  }
+
   // 渐变填充
-  const grad = ctx.createLinearGradient(0,0,0,h);
+  const grad = ctx.createLinearGradient(0, pad.top, 0, h);
   grad.addColorStop(0, color + '66');
   grad.addColorStop(1, color + '00');
   ctx.beginPath();
-  ctx.moveTo(0, h);
-  data.forEach((v,i) => { ctx.lineTo(i*step, h - (v/max*h*0.9)); });
-  ctx.lineTo(w, h);
+  ctx.moveTo(pad.left, h - pad.bottom);
+  sliced.forEach((v, i) => {
+    ctx.lineTo(pad.left + i * step, pad.top + plotH - (v / max * plotH));
+  });
+  ctx.lineTo(pad.left + (sliced.length-1) * step, h - pad.bottom);
   ctx.closePath();
   ctx.fillStyle = grad;
   ctx.fill();
+
   // 折线
   ctx.beginPath();
-  data.forEach((v,i) => { if(i===0) ctx.moveTo(i*step, h - (v/max*h*0.9)); else ctx.lineTo(i*step, h - (v/max*h*0.9)); });
+  sliced.forEach((v, i) => {
+    const x = pad.left + i * step;
+    const y = pad.top + plotH - (v / max * plotH);
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
   ctx.strokeStyle = color;
   ctx.lineWidth = 2;
   ctx.stroke();
+
+  // 数据点圆点
+  sliced.forEach((v, i) => {
+    const x = pad.left + i * step;
+    const y = pad.top + plotH - (v / max * plotH);
+    ctx.beginPath();
+    ctx.arc(x, y, 2.5, 0, Math.PI * 2);
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.strokeStyle = '#0c0f1e';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  });
+
+  // 存储数据供 tooltip 使用
+  canvas._chartData = { sliced, max, step, pad, plotW, plotH, color, label: label || '' };
 }
+
+// 时间范围切换事件
+document.querySelectorAll('.time-range').forEach(group => {
+  group.addEventListener('click', function(e) {
+    const btn = e.target.closest('.time-btn');
+    if (!btn) return;
+    this.querySelectorAll('.time-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    const range = parseInt(btn.dataset.range);
+    const key = this.id === 'danmakuRange' ? 'danmaku' : 'gift';
+    chartState[key].maxRange = range;
+    refreshMetrics();
+  });
+});
+
+// 鼠标悬停 tooltip
+document.addEventListener('mousemove', function(e) {
+  ['danmakuChart','giftChart'].forEach(cid => {
+    const canvas = document.getElementById(cid);
+    const tid = cid === 'danmakuChart' ? 'danmakuTooltip' : 'giftTooltip';
+    const tooltip = document.getElementById(tid);
+    if (!canvas || !tooltip || !canvas._chartData) { if(tooltip) tooltip.style.display = 'none'; return; }
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    const d = canvas._chartData;
+    if (mx < 0 || mx > rect.width || my < 0 || my > rect.height) {
+      tooltip.style.display = 'none'; return;
+    }
+    const idx = Math.round((mx - d.pad.left) / d.step);
+    if (idx < 0 || idx >= d.sliced.length) { tooltip.style.display = 'none'; return; }
+    const val = d.sliced[idx];
+    tooltip.style.display = 'block';
+    tooltip.style.left = (d.pad.left + idx * d.step + 8) + 'px';
+    tooltip.style.top = Math.max(0, d.pad.top + d.plotH - (val / d.max * d.plotH) - 30) + 'px';
+    tooltip.textContent = val + (d.label ? ' ' + d.label : '');
+  });
+});
 
 function escapeHtml(s) { if(!s) return ''; const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
 

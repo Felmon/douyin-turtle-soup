@@ -29,6 +29,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from openai import AsyncOpenAI
 
@@ -40,6 +41,7 @@ from dashboard import DASHBOARD_HTML
 from overlay import OVERLAY_HTML
 from data_soups_v6 import SOUPS, DIFFICULTY_CONFIG, DIFFICULTY_NAME, classify_by_length, _count_chars
 from tiers import TIERS, get_tier, check_tier_up, SCORE_BY_DIFFICULTY
+from theme_manager import theme_manager, ThemeManager
 
 
 # ── 全局 LLM 客户端（懒加载） ──
@@ -93,6 +95,11 @@ CREATE TABLE IF NOT EXISTS custom_soups (
     keywords TEXT, difficulty TEXT,
     source TEXT DEFAULT 'manual',
     created_at REAL
+);
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT,
+    updated_at REAL
 );
 """)
 _db.commit()
@@ -735,6 +742,10 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="海龟汤 v6", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
+THEMES_DIR = Path(__file__).resolve().parent / "themes"
+THEMES_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/static/themes", StaticFiles(directory=str(THEMES_DIR)), name="themes")
+
 
 # ── 三端路由 ──
 @app.get("/")
@@ -751,7 +762,9 @@ async def dashboard_page():
 
 @app.get("/overlay")
 async def overlay_page():
-    return HTMLResponse(content=OVERLAY_HTML)
+    active = theme_manager.get_active()
+    html = theme_manager.apply_to_html(OVERLAY_HTML, active)
+    return HTMLResponse(html)
 
 
 # ── 健康检查 ──
@@ -1043,6 +1056,35 @@ async def admin_metrics():
 async def export_data(format: str = "json"):
     rows = db_query("SELECT * FROM gift_log ORDER BY timestamp DESC LIMIT 500")
     return JSONResponse(content={"gift_log": rows, "stats": room.stats})
+
+
+# ── HTTP API: 主题系统 ──
+@app.get("/api/theme")
+async def get_theme():
+    """返回当前活动主题 CSS 变量。overlay 启动时调用。"""
+    active = theme_manager.get_active()
+    return {"theme_id": active, "vars": theme_manager.get_theme_dict(active)}
+
+
+@app.get("/api/admin/themes")
+async def list_themes():
+    """返回所有内置主题列表（admin Tab 用）。"""
+    return {"themes": theme_manager.list_themes()}
+
+
+class ThemeReq(BaseModel):
+    theme_id: str
+
+
+@app.post("/api/admin/theme")
+async def set_theme(req: ThemeReq):
+    """切换活动主题 + 广播 WS 消息。"""
+    from theme_manager import VALID_IDS
+    if req.theme_id not in VALID_IDS:
+        return {"ok": False, "error": f"Unknown theme_id: {req.theme_id}"}
+    theme_manager.set_active(req.theme_id)
+    await manager.broadcast({"type": "theme_change", "theme_id": req.theme_id})
+    return {"ok": True, "theme_id": req.theme_id}
 
 
 # ── HTTP API: 难度配置 ──

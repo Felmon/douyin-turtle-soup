@@ -31,12 +31,17 @@ from gift_slots import slot_manager, GIFT_LIBRARY
 from spam_filter import spam_filter
 
 # ── 加载 .env ──
-_env_path = Path(__file__).resolve().parent.parent / ".env"
+_env_path = (Path(sys.executable).resolve().parent / ".env") if getattr(sys, "frozen", False) else (Path(__file__).resolve().parent.parent / ".env")
 if _env_path.exists():
     load_dotenv(str(_env_path), encoding="utf-8")
     print(f"[Config] 已加载 .env: {_env_path}")
 else:
-    print(f"[Config] .env 未发现 ({_env_path})，使用默认配置")
+    _env_fallback = Path(__file__).resolve().parent.parent / ".env" if getattr(sys, "frozen", False) else None
+    if _env_fallback and _env_fallback.exists():
+        load_dotenv(str(_env_fallback), encoding="utf-8")
+        print(f"[Config] 已加载 .env(后备): {_env_fallback}")
+    else:
+        print(f"[Config] .env 未发现 ({_env_path})，使用默认配置")
 
 # ── 配置 ──
 LLM_API_KEY = os.getenv("LLM_API_KEY", "")
@@ -48,28 +53,27 @@ FRONTEND_PORT = int(os.getenv("FRONTEND_PORT", "3015"))
 
 # 兼容 exe (PyInstaller) 和开发模式
 if getattr(sys, "frozen", False):
-    PROJECT_ROOT = Path(sys.executable).resolve().parent
+    # --onefile: sys._MEIPASS → temp extract dir (bundled assets)
+    # --onedir:  sys.executable.parent → exe 所在目录
+    if getattr(sys, '_MEIPASS', None):
+        PROJECT_ROOT = Path(sys._MEIPASS)
+    else:
+        PROJECT_ROOT = Path(sys.executable).resolve().parent
     if not (PROJECT_ROOT / "meoo_frontend").exists() and (PROJECT_ROOT.parent / "meoo_frontend").exists():
         PROJECT_ROOT = PROJECT_ROOT.parent
+    DATA_ROOT = Path(sys.executable).resolve().parent  # 持久化数据放在 exe 旁边
 else:
     PROJECT_ROOT = Path(__file__).resolve().parent.parent
+    DATA_ROOT = PROJECT_ROOT
 FRONTEND_DIR = PROJECT_ROOT / "meoo_frontend"
 FRONTEND_DIST = FRONTEND_DIR / "dist"
 
 ANTI_STALL_INTERVAL = 180
 ANTI_STALL_DANMAKU = 50
 ANTI_STALL_DECAY = 0.8
+ANTI_STALL_ENABLED = True
 ROUND_END_DELAY = 5
 ROUND_TIMEOUT = 300  # 每局最长秒数
-AUTO_HINT_INTERVALS = [180, 240, 270]  # 触发自动提示的时间点（从开局起秒数）
-
-# ── 点赞阈值配置 ──
-LIKE_REVEAL_THRESHOLD = 500      # 点赞累积揭示阈值（单局内）
-LIKE_DIFF_THRESHOLDS = {         # 点赞→难度阈值
-    "easy": 300,
-    "medium": 500,
-    "hard": 800,
-}
 
 FUNCTION_WORDS = {
     "的","了","是","在","和","吗","呢","吧","着","过","得","地","个","一","不","没",
@@ -159,13 +163,26 @@ class CoinSystem:
 coins = CoinSystem()
 
 # ── SQLite 持久化层（失败回退内存模式） ──
-DB_PATH = Path(__file__).resolve().parent / "data" / "persistent.db"
+if getattr(sys, "frozen", False):
+    DB_PATH = DATA_ROOT / "backend" / "data" / "persistent.db"
+else:
+    DB_PATH = Path(__file__).resolve().parent / "data" / "persistent.db"
 try:
     db = PersistentDB(DB_PATH)
     print(f"[DB] 持久化就绪: {DB_PATH}")
 except Exception as _e:
     print(f"[DB] 初始化失败，回退内存模式: {_e}")
     db = None
+
+# 从持久化存储加载游戏时长配置
+if db is not None:
+    try:
+        saved = db.get_setting("round_timeout")
+        if saved is not None:
+            ROUND_TIMEOUT = int(saved)
+            print(f"[Config] 已加载游戏时长: {ROUND_TIMEOUT}秒")
+    except Exception:
+        pass
 # OpenAI 客户端（懒加载）
 _client_instance = None
 def get_client():
@@ -198,12 +215,6 @@ async def llm_classify(text: str, answer: str, keywords: list[str]) -> str:
         print(f"[LLM] classify error: {e}")
         return "不是"
 
-# ── 三级渐进提示（固定文本，无 LLM）──
-HINT_LEVEL_FALLBACKS = [
-    "想想故事里谁最可疑？",       # Level 0: 方向
-    "注意这个关键词能帮你理清思路",  # Level 1: 关键词
-    "答案中隐藏的关键点已经很明显了",  # Level 2: 半答案
-]
 DIFFICULTY_NAME_MAP = {"easy":"简单","medium":"一般","hard":"困难","hell":"地狱","void":"无人区","auto":"自适应"}
 GIFT_TAUNTS = {
     "like": ["就这？再来点！", "不够不够，继续！", "节奏带起来！"],
@@ -216,8 +227,7 @@ GIFT_TAUNTS = {
 COMBO_TAUNTS = {3: "连击x3！稳！", 5: "连击x5！大神！", 10: "连击x10！！无敌！"}
 
 SLOT_TAUNTS = {
-    "effect_highlight": ["高亮一个关键线索！", "这个字很关键！"],
-    "effect_hint": ["提示已送达，仔细想想！", "方向对了！"],
+    "effect_complete": ["直接通关！太强了！", "故事结束，恭喜通关！"],
     "effect_reveal1": ["揭示一字，真相更近了！", "关键字浮现！"],
     "effect_reveal_sentence": ["完整一句揭开！", "迷雾散开一些了！"],
     "effect_reveal_30p": ["大量内容揭示！", "真相即将大白！"],
@@ -230,7 +240,6 @@ async def llm_gift_solicit(gift_type: str, context: dict) -> str:
         "棒棒糖": "来个棒棒糖，揭开一句话！",
         "墨镜": "送墨镜，直接通关！",
         "粉丝灯牌": "点亮粉丝灯牌！",
-        "点赞": "点点赞，500赞揭示一字！",
     }
     try:
         resp = get_client().chat.completions.create(
@@ -316,9 +325,7 @@ class GameRoom:
         self.char_states = []
         self.qa_history = []
         self.gift_log = []
-        self.like_progress = 0
-        self.like_threshold = LIKE_REVEAL_THRESHOLD
-        self.session_likes = 0
+        self.like_progress = {}  # {slot_id: current_count} 点赞槽位累积
         self.next_difficulty = ""
         self.guess_count = 0
         self.start_time = 0
@@ -330,9 +337,7 @@ class GameRoom:
         self.current_difficulty = "medium"
         self.current_soup_id = ""
         self.round_timeout = ROUND_TIMEOUT
-        self.auto_hint_level = 0
         self.remaining = 0
-        self.hint_level = 0  # 0=未触发 1=方向提示 2=关键词提示 3=半答案
         # ── 自适应难度追踪 ──
         self.round_correct = 0
         self.round_total = 0
@@ -343,13 +348,10 @@ class GameRoom:
         return {
             "phase": self.phase, "guessCount": self.guess_count,
             "revealProgress": pct/100, "qaCount": len(self.qa_history),
-            "likeProgress": self.like_progress, "likeThreshold": self.like_threshold,
             "startTime": self.start_time, "remaining": self.remaining,
             "roundTimeout": self.round_timeout,
-            "hintLevel": self.hint_level,
             "difficulty": self.current_difficulty,
             "difficulty_name": {"easy":"简单","medium":"一般","hard":"困难","hell":"地狱","void":"无人区","auto":"自适应"}.get(self.current_difficulty, self.current_difficulty),
-            "sessionLikes": self.session_likes,
             "nextDifficulty": self.next_difficulty,
         }
 
@@ -379,8 +381,6 @@ async def auto_reveal_and_hint(reason: str = "timeout"):
     room.anti_last_reveal = time.time()
     room.anti_since_reveal = 0
     room.anti_triggers += 1
-    # 使用三级渐进提示
-    hint_level = min(room.anti_triggers - 1, 2)
     await manager.broadcast({"type": "reveal_update", "charStates": room.char_states, "auto": True})
     await manager.broadcast({
         "type": "auto_hint",
@@ -391,11 +391,10 @@ async def auto_reveal_and_hint(reason: str = "timeout"):
     _, t, p = RevealEngine.get_progress(room.char_states)
     if p >= 100 and room.phase != "complete":
         room.phase = "complete"
-        await _update_next_difficulty_from_likes()
         await manager.broadcast({"type": "game_end", "winner": "系统", "charStates": room.char_states})
 
 async def timer_tick_loop():
-    """每秒广播剩余时间，在预设时间点触发自动提示。"""
+    """每秒广播剩余时间，超时强制结束游戏。"""
     while True:
         await asyncio.sleep(1)
         try:
@@ -406,14 +405,6 @@ async def timer_tick_loop():
             room.remaining = remaining
             # 广播剩余时间
             await manager.broadcast({"type": "timer", "remaining": remaining, "elapsed": int(elapsed)})
-            # 检查自动提示触发点
-            while room.auto_hint_level < len(AUTO_HINT_INTERVALS):
-                interval = AUTO_HINT_INTERVALS[room.auto_hint_level]
-                if elapsed >= interval:
-                    room.auto_hint_level += 1
-                    await auto_reveal_and_hint("interval")
-                else:
-                    break
             # 超时强制结束
             if remaining <= 0:
                 await manager.broadcast({"type": "timer", "remaining": 0, "elapsed": int(elapsed)})
@@ -423,17 +414,18 @@ async def timer_tick_loop():
                         s["revealed"] = True
                 room.phase = "complete"
                 await manager.broadcast({"type": "reveal_update", "charStates": room.char_states, "auto": True})
-                await _update_next_difficulty_from_likes()
                 await manager.broadcast({"type": "game_end", "winner": "系统", "charStates": room.char_states})
         except Exception as e:
             print(f"[Timer] Error: {e}")
 
 async def anti_stall_loop():
-    """后备防卡死：弹幕冷场时自动揭示（改用 auto_hint 广播）。"""
+    """后备防卡死：弹幕冷场时自动揭示。"""
     while True:
         await asyncio.sleep(30)
         try:
             if not room.soup_answer or room.phase in ("idle", "complete", "lobby"):
+                continue
+            if not ANTI_STALL_ENABLED:
                 continue
             now = time.time()
             decay = ANTI_STALL_DECAY ** room.anti_triggers
@@ -476,28 +468,11 @@ def compute_adaptive_difficulty() -> str:
     return new_diff
 
 
-async def _update_next_difficulty_from_likes():
-    """根据本局点赞数设置下局难度（仅当未被礼物预设时）。"""
-    if room.next_difficulty:
-        return
-    likes = room.session_likes
-    if likes >= LIKE_DIFF_THRESHOLDS["hard"]:
-        room.next_difficulty = "hard"
-    elif likes >= LIKE_DIFF_THRESHOLDS["medium"]:
-        room.next_difficulty = "medium"
-    elif likes >= LIKE_DIFF_THRESHOLDS["easy"]:
-        room.next_difficulty = "easy"
-    else:
-        room.next_difficulty = "auto"
-    name = DIFFICULTY_NAME_MAP.get(room.next_difficulty, room.next_difficulty)
-    await manager.broadcast({"type":"difficulty_scheduled", "nextDifficulty": room.next_difficulty, "nextDifficultyName": name})
-    print(f"[Difficulty] 点赞→{room.next_difficulty} ({name}) sessionLikes={room.session_likes}")
-
 # ── 配置热加载 ──
 def reload_config():
     """从 .env 重新加载配置，不重启服务。"""
     global LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, ROUND_TIMEOUT
-    env_path = Path(__file__).resolve().parent.parent / ".env"
+    env_path = DATA_ROOT / ".env"
     if not env_path.exists():
         return False, ".env 不存在"
     load_dotenv(str(env_path), encoding="utf-8", override=True)
@@ -635,7 +610,6 @@ async def game_start(difficulty: str = "medium"):
     room.phase = "reading"
     room.start_time = time.time()
     room.remaining = room.round_timeout
-    room.auto_hint_level = 0
     await manager.broadcast({
         "type": "game_start", "surface": room.soup_text,
         "keywords": room.soup_keywords, "charStates": room.char_states,
@@ -840,8 +814,6 @@ async def websocket_endpoint(ws: WebSocket):
                 await game_start(msg.get("difficulty", "medium"))
             elif t == "buy_gift":
                 await buy_gift(BuyGiftReq(gift_type=msg.get("gift_type",""), user=msg.get("user","default")))
-            elif t == "buy_hint":
-                await handle_buy_hint(msg)
             elif t == "ping":
                 await ws.send_json({"type": "pong"})
     except WebSocketDisconnect:
@@ -925,71 +897,60 @@ async def handle_danmaku(msg: dict):
     _, total, pct = RevealEngine.get_progress(room.char_states)
     if pct >= 100:
         room.phase = "complete"
-        await _update_next_difficulty_from_likes()
         await manager.broadcast({"type":"game_end","winner":user,"charStates":room.char_states})
-
-async def handle_buy_hint(msg: dict):
-    """玩家购买下一级提示。"""
-    user = msg.get("user", "观众")
-    if room.hint_level >= 3:
-        await manager.broadcast({"type": "hint", "user": user, "hint": "提示已全部用完！", "auto": False})
-        return
-    level = room.hint_level
-    room.hint_level += 1
-    hint = HINT_LEVEL_FALLBACKS[level]
-    await manager.broadcast({"type": "progressive_hint", "user": user, "hint": hint, "level": level})
-    # Level 2 额外揭示一个字
-    if level >= 1:
-        u = RevealEngine.get_unrevealed(room.char_states)
-        if u:
-            target = rnd.choice(u)["char"]
-            room.char_states = RevealEngine.reveal_char(room.char_states, target)
-            await manager.broadcast({"type": "reveal_update", "charStates": room.char_states, "auto": True})
-    # 加分
-    hint_scores = [5, 10, 15]
-    await add_score(user, hint_scores[level])
 
 async def handle_gift(msg: dict):
     user = msg.get("nickname","观众")
     gift_name = msg.get("giftName","")
     gift_value = int(msg.get("diamondCount", 0) or 0)
-
-    # ── 点赞特殊处理（累积 like_progress，无连击/价格）──
-    if gift_name in ("点赞", "like"):
-        room.like_progress += msg.get("count",1)
-        room.session_likes += msg.get("count",1)
-        await manager.broadcast({"type":"like_update", "sessionLikes": room.session_likes, "maxLikes": LIKE_DIFF_THRESHOLDS["hard"]})
-        if room.like_progress >= room.like_threshold:
-            room.like_progress -= room.like_threshold
-            u = RevealEngine.get_unrevealed(room.char_states)
-            if u:
-                room.char_states = RevealEngine.reveal_char(room.char_states, rnd.choice(u)["char"])
-                await manager.broadcast({"type":"reveal_update","charStates":room.char_states})
-        r,t,p = RevealEngine.get_progress(room.char_states)
-        if r == t and t > 0 and room.phase != "complete":
-            room.phase = "complete"
-            await _update_next_difficulty_from_likes()
-            await manager.broadcast({"type":"game_end","winner":user,"charStates":room.char_states})
-        return
+    gift_count = msg.get("count", 1)
 
     # ── 通过礼物槽位系统解析 ──
     slot_id = slot_manager.resolve_gift(gift_name)
     if not slot_id:
         return
 
-    # ── 价格检查 ──
+    # ── 点赞模式：槽位绑定的礼物可累积点赞数，达到阈值后揭示一字 ──
+    slot_state = slot_manager.get_slot_state(slot_id)
+    is_like_mode = slot_state and slot_state.get("like_mode", False)
+    price = 0
     gift_info = GIFT_LIBRARY.get(gift_name, {})
-    price = gift_info.get("coins", 0)
-    if price > 0:
-        if not coins.spend(user, price):
-            await manager.broadcast({"type":"gift_error","user":user,"msg":f"金币不足！{gift_name}需要{price}金币"})
-            return
+    if is_like_mode:
+        threshold = slot_state.get("like_threshold", 500)
+        progress = room.like_progress.get(slot_id, 0) + gift_count
+        room.like_progress[slot_id] = progress
+        await manager.broadcast({"type":"like_update", "slotId": slot_id, "progress": progress, "threshold": threshold})
+        if progress >= threshold:
+            room.like_progress[slot_id] = 0
+            room.anti_last_reveal = time.time()
+            room.anti_since_reveal = 0
+            room.anti_triggers = 0
+            u = RevealEngine.get_unrevealed(room.char_states)
+            if u:
+                room.char_states = RevealEngine.reveal_char(room.char_states, rnd.choice(u)["char"])
+                await manager.broadcast({"type":"reveal_update","charStates":room.char_states})
+            r2, t2, p2 = RevealEngine.get_progress(room.char_states)
+            if r2 == t2 and t2 > 0 and room.phase != "complete":
+                room.phase = "complete"
+                await manager.broadcast({"type":"game_end","winner":user,"charStates":room.char_states})
+        # 点赞模式：跳过价格/连击/普通效果，但难度切换仍然执行
+        # （不 return，让下面的难度派发逻辑继续运行）
 
-    # ── 连击 ──
-    combo = coins.update_combo(user)
-    room.gift_log.append({"user":user,"giftName":gift_name,"slotId":slot_id,"time":time.time()})
-    if gift_value > 0:
-        await add_score(user, gift_value)
+    # ── 价格检查 + 连击（非点赞模式才执行） ──
+    if not is_like_mode:
+        price = gift_info.get("coins", 0)
+        if price > 0:
+            if not coins.spend(user, price):
+                await manager.broadcast({"type":"gift_error","user":user,"msg":f"金币不足！{gift_name}需要{price}金币"})
+                return
+
+        # ── 连击 ──
+        combo = coins.update_combo(user)
+        room.gift_log.append({"user":user,"giftName":gift_name,"slotId":slot_id,"time":time.time()})
+        if gift_value > 0:
+            await add_score(user, gift_value)
+    else:
+        combo = {"count": 0, "multiplier": 1.0}
     if db is not None:
         try:
             db.log_gift(user, gift_name, gift_value or price)
@@ -1015,22 +976,14 @@ async def handle_gift(msg: dict):
             await manager.broadcast({"type":"difficulty_scheduled", "nextDifficulty": nd, "nextDifficultyName": nd_name})
             print(f"[Difficulty] 礼物→槽位{slot_id} = {nd} ({nd_name})")
 
-    # ── 效果槽派发 ──
-    elif slot_id == "effect_highlight":
-        cand = [s for s in room.char_states if s["isContent"] and not s["revealed"]]
-        if cand:
-            freq = {}
-            for ch in room.soup_answer:
-                if RevealEngine.is_content_word(ch):
-                    freq[ch] = freq.get(ch, 0) + 1
-            cand.sort(key=lambda s: freq.get(s["char"], 0), reverse=True)
-            target = cand[0]["char"]
-            room.char_states = RevealEngine.reveal_char(room.char_states, target)
-            await manager.broadcast({"type":"reveal_update","charStates":room.char_states,"highlight":target})
-
-    elif slot_id == "effect_hint":
-        hint = HINT_LEVEL_FALLBACKS[0] if HINT_LEVEL_FALLBACKS else "仔细想想故事里的细节！"
-        await manager.broadcast({"type":"hint","hint":hint,"script":"💡 " + hint})
+    # ── 效果槽派发（点赞模式不执行，已在上方处理完揭示） ──
+    elif slot_id == "effect_complete" and not is_like_mode:
+        for s in room.char_states:
+            if s["isContent"] and not s["revealed"]:
+                s["revealed"] = True
+        room.phase = "complete"
+        await manager.broadcast({"type":"reveal_update","charStates":room.char_states})
+        await manager.broadcast({"type":"game_end","winner":user,"charStates":room.char_states})
 
     elif slot_id == "effect_reveal1":
         revealed_any = False
@@ -1068,7 +1021,6 @@ async def handle_gift(msg: dict):
     r,t,p = RevealEngine.get_progress(room.char_states)
     if r == t and t > 0 and room.phase != "complete":
         room.phase = "complete"
-        await _update_next_difficulty_from_likes()
         await manager.broadcast({"type":"game_end","winner":user,"charStates":room.char_states})
 
     # ── 广播礼物效果 ──
@@ -1141,42 +1093,43 @@ async def admin_reload_config():
     ok, msg = reload_config()
     return {"ok": ok, "msg": msg}
 
-@app.get("/api/admin/like-config")
-async def get_like_config():
+# ── 防卡死配置 ──
+
+@app.get("/api/admin/anti-stall-config")
+async def get_anti_stall_config():
     return {
-        "revealThreshold": LIKE_REVEAL_THRESHOLD,
-        "diffThresholds": LIKE_DIFF_THRESHOLDS,
+        "enabled": ANTI_STALL_ENABLED,
+        "interval": ANTI_STALL_INTERVAL,
+        "danmaku": ANTI_STALL_DANMAKU,
     }
 
-@app.post("/api/admin/like-config")
-async def set_like_config(req: dict):
-    global LIKE_REVEAL_THRESHOLD, LIKE_DIFF_THRESHOLDS
-    if "revealThreshold" in req:
-        LIKE_REVEAL_THRESHOLD = int(req["revealThreshold"])
-        room.like_threshold = LIKE_REVEAL_THRESHOLD
-    if "diffThresholds" in req:
-        dt = req["diffThresholds"]
-        if "easy" in dt: LIKE_DIFF_THRESHOLDS["easy"] = int(dt["easy"])
-        if "medium" in dt: LIKE_DIFF_THRESHOLDS["medium"] = int(dt["medium"])
-        if "hard" in dt: LIKE_DIFF_THRESHOLDS["hard"] = int(dt["hard"])
+@app.post("/api/admin/anti-stall-config")
+async def set_anti_stall_config(req: dict):
+    global ANTI_STALL_ENABLED, ANTI_STALL_INTERVAL, ANTI_STALL_DANMAKU
+    if "enabled" in req:
+        ANTI_STALL_ENABLED = bool(req["enabled"])
+    if "interval" in req:
+        ANTI_STALL_INTERVAL = max(30, int(req["interval"]))
+    if "danmaku" in req:
+        ANTI_STALL_DANMAKU = max(5, int(req["danmaku"]))
     return {"ok": True}
 
 
-# ── 提示文本配置（三级渐进提示）──
+# ── 游戏时长配置 ──
 
-@app.get("/api/admin/hint-config")
-async def get_hint_config():
-    return {"hints": HINT_LEVEL_FALLBACKS}
+@app.get("/api/admin/game-config")
+async def get_game_config():
+    return {"roundTimeout": ROUND_TIMEOUT}
 
-@app.post("/api/admin/hint-config")
-async def set_hint_config(req: dict):
-    hints = req.get("hints", [])
-    if len(hints) != 3:
-        return {"ok": False, "msg": "需要3条提示文本"}
-    for i, h in enumerate(hints):
-        if not isinstance(h, str) or not h.strip():
-            return {"ok": False, "msg": f"提示{i+1}无效"}
-        HINT_LEVEL_FALLBACKS[i] = h.strip()
+@app.post("/api/admin/game-config")
+async def set_game_config(req: dict):
+    global ROUND_TIMEOUT
+    if "roundTimeout" in req:
+        val = int(req["roundTimeout"])
+        ROUND_TIMEOUT = max(30, min(3600, val))
+        if db is not None:
+            db.set_setting("round_timeout", str(ROUND_TIMEOUT))
+        print(f"[Config] 游戏时长已更新: {ROUND_TIMEOUT}秒")
     return {"ok": True}
 
 
@@ -1203,6 +1156,17 @@ class ToggleSlotReq(BaseModel):
 @app.post("/api/admin/slots/toggle")
 async def toggle_slot(req: ToggleSlotReq):
     slot_manager.set_enabled(req.slot_id, req.enabled)
+    await manager.broadcast({"type": "slots_updated"})
+    return {"ok": True}
+
+class SlotLikeConfigReq(BaseModel):
+    slot_id: str
+    like_mode: bool
+    like_threshold: int = 500
+
+@app.post("/api/admin/slots/like-config")
+async def set_slot_like_config(req: SlotLikeConfigReq):
+    slot_manager.set_like_config(req.slot_id, req.like_mode, req.like_threshold)
     await manager.broadcast({"type": "slots_updated"})
     return {"ok": True}
 
@@ -1324,6 +1288,34 @@ async def admin_ai_generate(req: dict):
         return {"soups": []}
     return {"soups": soups}
 
+@app.post("/api/admin/llm-ping")
+async def admin_llm_ping():
+    """检测 LLM 模型连通性，发送一条简单请求验证模型是否可用"""
+    status = ""
+    try:
+        client = get_client()
+        resp = client.chat.completions.create(
+            model=LLM_MODEL,
+            messages=[{"role":"user","content":"仅回复一个词：OK"}],
+            max_tokens=10, temperature=0.1,
+        )
+        text = resp.choices[0].message.content.strip()
+        status = f"响应正常"
+        return {"ok": True, "model": LLM_MODEL, "response": text, "msg": f"模型 {LLM_MODEL} 响应正常"}
+    except Exception as e:
+        return {"ok": False, "model": LLM_MODEL, "error": str(e), "msg": f"连接失败: {str(e)}"}
+
+@app.get("/api/admin/llm-models")
+async def admin_llm_models():
+    """获取 API 端点可用的模型列表"""
+    try:
+        client = get_client()
+        models = client.models.list()
+        names = sorted([m.id for m in models])
+        return {"ok": True, "models": names}
+    except Exception as e:
+        return {"ok": False, "models": [], "error": str(e)}
+
 @app.post("/api/admin/ai-approve")
 async def admin_ai_approve(req: dict):
     soup = req.get("soup", {})
@@ -1368,22 +1360,6 @@ async def admin_metrics():
         "gift_series": [],
         "recentGifts": [{"user": g["user"], "gift_name": g["giftName"], "coins": GIFT_LIBRARY.get(g["giftName"], {}).get("coins", 0)} for g in room.gift_log[-10:]],
     }
-
-@app.post("/api/game/hint/buy")
-async def buy_hint_api(user: str = "default"):
-    """REST API 方式购买提示。"""
-    if room.hint_level >= 3:
-        return {"ok": False, "msg": "提示已全部用完"}
-    level = room.hint_level
-    room.hint_level += 1
-    hint = HINT_LEVEL_FALLBACKS[level]
-    await manager.broadcast({"type": "progressive_hint", "user": user, "hint": hint, "level": level})
-    if level >= 1:
-        u = RevealEngine.get_unrevealed(room.char_states)
-        if u:
-            room.char_states = RevealEngine.reveal_char(room.char_states, rnd.choice(u)["char"])
-            await manager.broadcast({"type": "reveal_update", "charStates": room.char_states, "auto": True})
-    return {"ok": True, "hint": hint, "level": level}
 
 # ── 前端路由 ──
 _dist_index = FRONTEND_DIST / "index.html"

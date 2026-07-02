@@ -628,11 +628,6 @@ function handle(msg){
         case 'auto_hint':
             showAutoHint(msg.text, msg.revealed);
             break;
-        case 'progressive_hint':
-            var _levelNames=['🔮 方向引导','🔮 关键词提示','🔮 半答案提示'];
-            var _levelName=_levelNames[msg.level]||'💡 提示';
-            showAutoHint(_levelName+': '+msg.hint, '');
-            break;
         case 'reveal_update':
             if(msg.charStates){
                 const old=gameState.charStates;
@@ -756,10 +751,6 @@ function startGame(){
 }
 function sendGift(name){
     if(ws&&ws.readyState===1)ws.send(JSON.stringify({type:'gift',giftName:name,nickname:'default',diamondCount:0}));
-    else alert('请先连接服务器');
-}
-function buyHint(){
-    if(ws&&ws.readyState===1)ws.send(JSON.stringify({type:'buy_hint',user:'观众'}));
     else alert('请先连接服务器');
 }
 function addContrib(user,n){

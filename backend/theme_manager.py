@@ -6,6 +6,7 @@
   - apply_to_html: 在 <style>:root{} 块中插入 CSS 变量
 """
 import sqlite3
+import sys
 import time
 from pathlib import Path
 from threading import Lock
@@ -79,6 +80,160 @@ BUILTIN_THEMES = {
             "--bg-image": "url('/static/themes/festival/bg.jpg')",
         },
     },
+    "ocean": {
+        "id": "ocean",
+        "name": "深海蓝",
+        "accent": "#0ea5e9",
+        "vars": {
+            "--bg": "#020617",
+            "--bg-grad": "linear-gradient(180deg,#0c1e3a 0%,#062044 50%,#021426 100%)",
+            "--card": "rgba(12,30,58,0.88)",
+            "--card-border": "rgba(14,165,233,0.12)",
+            "--primary": "#0ea5e9",
+            "--gold": "#fbbf24",
+            "--green": "#10b981",
+            "--red": "#f43f5e",
+            "--yellow": "#eab308",
+            "--pink": "#f472b6",
+            "--purple": "#8b5cf6",
+            "--text": "#e0f2fe",
+            "--text-dim": "#7dd3fc",
+            "--text-dimmer": "#0c4a6e",
+            "--bg-image": "url('/static/themes/ocean/bg.jpg')",
+        },
+    },
+    "forest": {
+        "id": "forest",
+        "name": "森林绿",
+        "accent": "#22c55e",
+        "vars": {
+            "--bg": "#041a0a",
+            "--bg-grad": "linear-gradient(180deg,#0a2e14 0%,#06401a 50%,#042a10 100%)",
+            "--card": "rgba(10,30,15,0.88)",
+            "--card-border": "rgba(34,197,94,0.15)",
+            "--primary": "#22c55e",
+            "--gold": "#f59e0b",
+            "--green": "#16a34a",
+            "--red": "#ef4444",
+            "--yellow": "#eab308",
+            "--pink": "#f472b6",
+            "--purple": "#a855f7",
+            "--text": "#ecfdf5",
+            "--text-dim": "#6ee7b7",
+            "--text-dimmer": "#065f46",
+            "--bg-image": "url('/static/themes/forest/bg.jpg')",
+        },
+    },
+    "sakura": {
+        "id": "sakura",
+        "name": "樱花粉",
+        "accent": "#f472b6",
+        "vars": {
+            "--bg": "#1a0a12",
+            "--bg-grad": "linear-gradient(180deg,#2e1020 0%,#4a1530 50%,#2e1020 100%)",
+            "--card": "rgba(40,12,25,0.88)",
+            "--card-border": "rgba(244,114,182,0.15)",
+            "--primary": "#f472b6",
+            "--gold": "#fbbf24",
+            "--green": "#34d399",
+            "--red": "#fb7185",
+            "--yellow": "#fde68a",
+            "--pink": "#ec4899",
+            "--purple": "#c084fc",
+            "--text": "#fdf2f8",
+            "--text-dim": "#f9a8d4",
+            "--text-dimmer": "#831843",
+            "--bg-image": "url('/static/themes/sakura/bg.jpg')",
+        },
+    },
+    "aurora": {
+        "id": "aurora",
+        "name": "极光",
+        "accent": "#2dd4bf",
+        "vars": {
+            "--bg": "#021a1a",
+            "--bg-grad": "linear-gradient(180deg,#062e2e 0%,#1a0a3a 50%,#062e2e 100%)",
+            "--card": "rgba(6,40,40,0.88)",
+            "--card-border": "rgba(45,212,191,0.12)",
+            "--primary": "#2dd4bf",
+            "--gold": "#fbbf24",
+            "--green": "#34d399",
+            "--red": "#fb7185",
+            "--yellow": "#fde68a",
+            "--pink": "#e879f9",
+            "--purple": "#a78bfa",
+            "--text": "#ccfbf1",
+            "--text-dim": "#5eead4",
+            "--text-dimmer": "#115e59",
+            "--bg-image": "url('/static/themes/aurora/bg.jpg')",
+        },
+    },
+    "cyberpunk": {
+        "id": "cyberpunk",
+        "name": "赛博朋克",
+        "accent": "#e879f9",
+        "vars": {
+            "--bg": "#0a0010",
+            "--bg-grad": "linear-gradient(180deg,#140626 0%,#2a0a3d 50%,#0a0018 100%)",
+            "--card": "rgba(20,6,38,0.9)",
+            "--card-border": "rgba(232,121,249,0.18)",
+            "--primary": "#e879f9",
+            "--gold": "#facc15",
+            "--green": "#22d3ee",
+            "--red": "#f43f5e",
+            "--yellow": "#fef08a",
+            "--pink": "#f472b6",
+            "--purple": "#c084fc",
+            "--text": "#f5f3ff",
+            "--text-dim": "#d8b4fe",
+            "--text-dimmer": "#6b21a8",
+            "--bg-image": "url('/static/themes/cyberpunk/bg.jpg')",
+        },
+    },
+    "sunset": {
+        "id": "sunset",
+        "name": "落日橙",
+        "accent": "#f97316",
+        "vars": {
+            "--bg": "#1a0802",
+            "--bg-grad": "linear-gradient(180deg,#3a1406 0%,#5a1a0a 50%,#3a0e04 100%)",
+            "--card": "rgba(50,12,4,0.88)",
+            "--card-border": "rgba(249,115,22,0.15)",
+            "--primary": "#f97316",
+            "--gold": "#f59e0b",
+            "--green": "#22c55e",
+            "--red": "#ef4444",
+            "--yellow": "#fbbf24",
+            "--pink": "#f472b6",
+            "--purple": "#a855f7",
+            "--text": "#fff7ed",
+            "--text-dim": "#fdba74",
+            "--text-dimmer": "#9a3412",
+            "--bg-image": "url('/static/themes/sunset/bg.jpg')",
+        },
+    },
+    "lavender": {
+        "id": "lavender",
+        "name": "薰衣草",
+        "accent": "#818cf8",
+        "vars": {
+            "--bg": "#0a0a1a",
+            "--bg-grad": "linear-gradient(180deg,#14143a 0%,#2a1a4a 50%,#14143a 100%)",
+            "--card": "rgba(16,14,40,0.88)",
+            "--card-border": "rgba(129,140,248,0.12)",
+            "--primary": "#818cf8",
+            "--gold": "#fbbf24",
+            "--green": "#34d399",
+            "--red": "#f87171",
+            "--yellow": "#fde68a",
+            "--pink": "#f0abfc",
+            "--purple": "#a78bfa",
+            "--text": "#eef2ff",
+            "--text-dim": "#a5b4fc",
+            "--text-dimmer": "#3730a3",
+            "--bg-image": "url('/static/themes/lavender/bg.jpg')",
+        },
+    },
 }
 
 VALID_IDS = set(BUILTIN_THEMES.keys())
@@ -93,7 +248,14 @@ class ThemeManager:
 
     def __init__(self, db_path: str | None = None):
         if db_path is None:
-            db_path = str(Path(__file__).resolve().parent / "data" / "v6.db")
+            if getattr(sys, "frozen", False):
+                if getattr(sys, '_MEIPASS', None):
+                    base = Path(sys._MEIPASS)
+                else:
+                    base = Path(sys.executable).resolve().parent
+            else:
+                base = Path(__file__).resolve().parent
+            db_path = str(base / "data" / "v6.db")
         self.db_path = db_path
         self._lock = Lock()
         # 确保 data 目录存在 + 表已建

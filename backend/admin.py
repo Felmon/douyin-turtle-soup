@@ -74,11 +74,15 @@ body{background:#0c0f1e;color:#e2e8f0;font-family:-apple-system,'PingFang SC','M
 .diff-btn .range{font-size:10px;color:#64748b;margin-bottom:2px}
 .diff-btn .multi{font-size:11px;color:#fbbf24;font-weight:600}
 
-.slot-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
+.slot-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
 .slot-card{padding:10px;background:rgba(0,0,0,0.3);border-radius:8px;border:1px solid rgba(255,255,255,0.05);position:relative;cursor:pointer;transition:all 0.2s}
 .slot-card:hover{border-color:#00d4ff;background:rgba(0,212,255,0.05)}
 .slot-card.disabled{opacity:0.4}
-.slot-card .icon{width:40px;height:40px;border-radius:8px;background:rgba(100,116,139,0.2);margin:0 auto 6px;background-size:cover;background-position:center;display:flex;align-items:center;justify-content:center;font-size:20px}
+.slot-card .icon{width:40px;height:40px;border-radius:8px;background:rgba(100,116,139,0.2);margin:0 auto 6px;background-size:cover;background-position:center;display:flex;align-items:center;justify-content:center;font-size:20px;position:relative}
+.slot-card .icon.like-mode-gift{opacity:0.5;filter:grayscale(0.6)}
+.slot-card .like-mode-overlay{position:absolute;bottom:0;left:0;right:0;background:rgba(245,158,11,0.85);color:#000;font-size:8px;font-weight:700;text-align:center;line-height:14px;border-radius:0 0 8px 8px;pointer-events:none}
+.slot-card .name.dimmed{color:#64748b;text-decoration:line-through}
+.slot-card .like-badge{font-size:9px;color:#f59e0b;margin-top:2px;background:rgba(245,158,11,0.1);border-radius:4px;padding:2px 6px;text-align:center}
 .slot-card .name{font-size:11px;font-weight:600;color:#e2e8f0;text-align:center;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .slot-card .desc{font-size:9px;color:#64748b;text-align:center;line-height:1.3}
 .slot-card .group-tag{position:absolute;top:4px;right:4px;font-size:8px;padding:1px 5px;border-radius:4px;font-weight:600}
@@ -192,6 +196,15 @@ canvas{max-width:100%}
           </div>
           <button class="btn btn-ghost btn-sm" onclick="reloadConfig()" style="margin-top:6px">🔄 重载配置</button>
         </div>
+        <!-- 游戏时长配置 -->
+        <div class="section" style="margin-top:8px">
+          <h2>⏱ 游戏时长</h2>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:8px">
+            <label style="font-size:11px;color:#94a3b8">每局时长(分钟): <input id="cfgGameDuration" type="number" min="1" max="60" value="5" style="width:60px;padding:4px 6px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.1);border-radius:4px;color:#e2e8f0;font-size:12px"></label>
+            <button class="btn btn-sm" onclick="saveGameConfig()" style="background:rgba(0,212,255,0.15);border:1px solid rgba(0,212,255,0.3);color:#00d4ff;padding:4px 12px;border-radius:4px;cursor:pointer">💾 保存</button>
+            <span id="cfgGameDurationStatus" style="font-size:11px;color:#64748b"></span>
+          </div>
+        </div>
       </div>
 
       <div style="margin-top:12px" class="section">
@@ -220,29 +233,19 @@ canvas{max-width:100%}
 </div>
 
   <!-- 礼物槽位 -->
-  <div class="tab-content" id="tab-slots">
+    <div class="tab-content" id="tab-slots">
     <div class="section">
-      <h2>10个固定槽位（5效果 + 5难度）</h2>
-      <div style="font-size:11px;color:#64748b;margin-bottom:12px">点击槽位从368+抖音礼物中选择绑定。已绑定的礼物在直播间送礼即触发对应效果。点击槽位右上角可启用/禁用。</div>
+      <h2>9个固定槽位（4效果 + 5难度）</h2>
+      <div style="font-size:11px;color:#64748b;margin-bottom:12px">点击槽位从368+抖音礼物中选择绑定。已绑定的礼物在直播间送礼即触发对应效果。点击槽位右上角可启用/禁用。点击「点赞」将槽位设为点赞模式，送礼累积到设定次数后揭示一字。</div>
       <div class="slot-grid" id="slotGrid"></div>
     </div>
     <div style="margin-top:12px" class="section">
-      <h2>点赞阈值设置 <span style="font-size:11px;color:#64748b;font-weight:normal">揭示阈值 · 难度门槛</span></h2>
+      <h2>防卡死设置 <span style="font-size:11px;color:#64748b;font-weight:normal">冷场时自动揭示</span></h2>
       <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:8px">
-        <label style="font-size:11px;color:#94a3b8">揭示: <input id="cfgRevealThreshold" type="number" value="500" style="width:60px;padding:4px 6px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.1);border-radius:4px;color:#e2e8f0;font-size:12px"></label>
-        <label style="font-size:11px;color:#94a3b8">→简单: <input id="cfgEasyThreshold" type="number" value="300" style="width:55px;padding:4px 6px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.1);border-radius:4px;color:#e2e8f0;font-size:12px"></label>
-        <label style="font-size:11px;color:#94a3b8">→一般: <input id="cfgMediumThreshold" type="number" value="500" style="width:55px;padding:4px 6px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.1);border-radius:4px;color:#e2e8f0;font-size:12px"></label>
-        <label style="font-size:11px;color:#94a3b8">→困难: <input id="cfgHardThreshold" type="number" value="800" style="width:55px;padding:4px 6px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.1);border-radius:4px;color:#e2e8f0;font-size:12px"></label>
-        <button class="btn btn-sm" onclick="saveLikeConfig()" style="background:rgba(0,212,255,0.15);border:1px solid rgba(0,212,255,0.3);color:#00d4ff;padding:4px 12px;border-radius:4px;cursor:pointer">保存</button>
-      </div>
-    </div>
-    <div style="margin-top:12px" class="section">
-      <h2>三级提示文本 <span style="font-size:11px;color:#64748b;font-weight:normal">购买/槽位触发的渐进提示</span></h2>
-      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:8px">
-        <label style="font-size:11px;color:#94a3b8">Level 1: <input id="cfgHint0" type="text" value="想想故事里谁最可疑？" style="width:180px;padding:4px 6px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.1);border-radius:4px;color:#e2e8f0;font-size:12px"></label>
-        <label style="font-size:11px;color:#94a3b8">Level 2: <input id="cfgHint1" type="text" value="注意这个关键词能帮你理清思路" style="width:180px;padding:4px 6px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.1);border-radius:4px;color:#e2e8f0;font-size:12px"></label>
-        <label style="font-size:11px;color:#94a3b8">Level 3: <input id="cfgHint2" type="text" value="答案中隐藏的关键点已经很明显了" style="width:180px;padding:4px 6px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.1);border-radius:4px;color:#e2e8f0;font-size:12px"></label>
-        <button class="btn btn-sm" onclick="saveHintConfig()" style="background:rgba(0,212,255,0.15);border:1px solid rgba(0,212,255,0.3);color:#00d4ff;padding:4px 12px;border-radius:4px;cursor:pointer">保存</button>
+        <label style="font-size:11px;color:#94a3b8"><input id="cfgAntiStallEnabled" type="checkbox" checked style="margin-right:4px">启用</label>
+        <label style="font-size:11px;color:#94a3b8">时间间隔(秒): <input id="cfgAntiStallInterval" type="number" value="180" style="width:60px;padding:4px 6px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.1);border-radius:4px;color:#e2e8f0;font-size:12px"></label>
+        <label style="font-size:11px;color:#94a3b8">弹幕数: <input id="cfgAntiStallDanmaku" type="number" value="50" style="width:55px;padding:4px 6px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.1);border-radius:4px;color:#e2e8f0;font-size:12px"></label>
+        <button class="btn btn-sm" onclick="saveAntiStallConfig()" style="background:rgba(0,212,255,0.15);border:1px solid rgba(0,212,255,0.3);color:#00d4ff;padding:4px 12px;border-radius:4px;cursor:pointer">保存</button>
       </div>
     </div>
   </div>
@@ -281,9 +284,38 @@ canvas{max-width:100%}
         <button class="btn btn-danger btn-sm" onclick="rejectAllAi()">✗ 全部废弃</button>
       </div>
     </div>
-  </div>
 
-  <!-- 数据 -->
+    <div class="section" style="margin-top:16px;border-top:1px solid rgba(255,255,255,0.06);padding-top:16px">
+      <h2>🤖 LLM API 配置</h2>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px">
+        <div>
+          <label style="font-size:11px;color:#94a3b8;display:block;margin-bottom:4px">API 地址</label>
+          <input type="text" id="cfgLlmBaseUrl" placeholder="https://api.deepseek.com" style="width:100%;padding:8px 10px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.1);border-radius:6px;color:#e2e8f0;font-size:12px">
+        </div>
+        <div>
+          <label style="font-size:11px;color:#94a3b8;display:block;margin-bottom:4px">模型</label>
+          <div style="display:flex;gap:4px">
+            <select id="cfgLlmModel" style="flex:1;padding:8px 10px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.1);border-radius:6px;color:#e2e8f0;font-size:12px">
+              <option value="deepseek-v4-flash">deepseek-v4-flash</option>
+            </select>
+            <button class="btn btn-ghost btn-sm" onclick="fetchLlmModels()" title="从 API 获取可用模型列表" style="font-size:10px;padding:4px 10px">📋 获取模型</button>
+          </div>
+        </div>
+      </div>
+      <div style="margin-top:8px">
+        <label style="font-size:11px;color:#94a3b8;display:block;margin-bottom:4px">API Key</label>
+        <div style="display:flex;gap:8px">
+          <input type="password" id="cfgLlmApiKey" placeholder="sk-..." style="flex:1;padding:8px 10px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.1);border-radius:6px;color:#e2e8f0;font-size:12px">
+          <button class="btn btn-ghost btn-sm" onclick="toggleApiKeyVis()" style="font-size:10px;padding:4px 10px">👁</button>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <button class="btn btn-cyan" onclick="saveLlmConfig()">💾 保存配置</button>
+        <button class="btn btn-ghost" onclick="detectLlmModel()">🔍 检测模型</button>
+        <span id="llmConfigStatus" style="font-size:11px;color:#64748b;align-self:center"></span>
+      </div>
+    </div>
+  </div>
   <div class="tab-content" id="tab-data">
     <div class="metrics-row">
       <div class="metric-card"><div class="label">本局积分总数</div><div class="val gold" id="mTotalScore">0</div></div>
@@ -410,7 +442,7 @@ function handleMessage(msg) {
     case 'tier_up': addLog('⬆ ' + msg.user + ' 升级到 ' + (msg.to_tier?.name||'')); break;
     case 'score_update': addLog('📊 ' + msg.user + ' 积分: ' + msg.score); break;
     case 'hint': addLog('💡 提示: ' + (msg.hint||'')); break;
-    case 'slots_updated': loadSlots(); loadHintConfig(); break;
+    case 'slots_updated': loadSlots(); break;
     case 'metrics_update': updateMetrics(msg.metrics); break;
     case 'theme_change': loadThemes(); break;
   }
@@ -551,50 +583,132 @@ async function reloadConfig() {
   } catch(e) { addLog('❌ 重载请求失败'); }
 }
 
-async function loadLikeConfig() {
+// ── LLM 配置 ──
+async function loadLlmConfig() {
   try {
-    const data = await apiGet('/api/admin/like-config');
-    document.getElementById('cfgRevealThreshold').value = data.revealThreshold || 500;
-    document.getElementById('cfgEasyThreshold').value = data.diffThresholds?.easy || 300;
-    document.getElementById('cfgMediumThreshold').value = data.diffThresholds?.medium || 500;
-    document.getElementById('cfgHardThreshold').value = data.diffThresholds?.hard || 800;
+    const r = await apiGet('/api/config');
+    if (r) {
+      document.getElementById('cfgLlmBaseUrl').value = r.base_url || '';
+      const sel = document.getElementById('cfgLlmModel');
+      // 添加当前模型选项（如不在列表中）
+      if (r.model && !Array.from(sel.options).some(o => o.value === r.model)) {
+        sel.add(new Option(r.model, r.model));
+      }
+      sel.value = r.model || 'deepseek-v4-flash';
+      document.getElementById('cfgLlmApiKey').value = r.api_key_configured ? '••••••••' : '';
+    }
   } catch(e) {}
 }
 
-async function saveLikeConfig() {
+async function saveLlmConfig() {
+  const el = document.getElementById('llmConfigStatus');
+  el.textContent = '保存中...';
   try {
-    const revealThreshold = parseInt(document.getElementById('cfgRevealThreshold').value) || 500;
-    const easy = parseInt(document.getElementById('cfgEasyThreshold').value) || 300;
-    const medium = parseInt(document.getElementById('cfgMediumThreshold').value) || 500;
-    const hard = parseInt(document.getElementById('cfgHardThreshold').value) || 800;
-    const r = await apiPost('/api/admin/like-config', {
-      revealThreshold: revealThreshold,
-      diffThresholds: { easy, medium, hard },
-    });
-    addLog(r.ok ? '✅ 点赞阈值已更新' : '❌ 保存失败');
-    if (r.ok) loadLikeConfig();
+    const body = {
+      base_url: document.getElementById('cfgLlmBaseUrl').value.trim(),
+      model: document.getElementById('cfgLlmModel').value.trim(),
+    };
+    const key = document.getElementById('cfgLlmApiKey').value.trim();
+    if (key && key !== '••••••••') body.api_key = key;
+    const r = await apiPost('/api/config', body);
+    el.textContent = r.ok ? '✅ 已保存' : '❌ 保存失败';
+    if (r.ok) setTimeout(() => el.textContent = '', 3000);
+  } catch(e) {
+    el.textContent = '❌ 请求失败';
+  }
+}
+
+function toggleApiKeyVis() {
+  const el = document.getElementById('cfgLlmApiKey');
+  el.type = el.type === 'password' ? 'text' : 'password';
+}
+
+async function detectLlmModel() {
+  const el = document.getElementById('llmConfigStatus');
+  el.textContent = '⏳ 检测中...';
+  const baseUrl = document.getElementById('cfgLlmBaseUrl').value.trim();
+  const model = document.getElementById('cfgLlmModel').value.trim();
+  const key = document.getElementById('cfgLlmApiKey').value.trim();
+  if (!baseUrl || !model) { el.textContent = '❌ 请先填写 API 地址和模型'; return; }
+  // 先保存当前配置到服务器
+  const saveBody = { base_url: baseUrl, model: model };
+  if (key && key !== '••••••••') saveBody.api_key = key;
+  await apiPost('/api/config', saveBody);
+  // 调用检测接口
+  const r = await apiPost('/api/admin/llm-ping', {});
+  el.textContent = r.ok ? '✅ ' + r.msg : '❌ ' + r.msg;
+  if (r.error) addLog('❌ LLM 检测失败: ' + r.error);
+  setTimeout(() => el.textContent = '', 8000);
+}
+
+async function fetchLlmModels() {
+  const el = document.getElementById('llmConfigStatus');
+  el.textContent = '⏳ 获取模型列表...';
+  // 先确保配置已保存
+  const baseUrl = document.getElementById('cfgLlmBaseUrl').value.trim();
+  const key = document.getElementById('cfgLlmApiKey').value.trim();
+  const saveBody = { base_url: baseUrl };
+  if (key && key !== '••••••••') saveBody.api_key = key;
+  await apiPost('/api/config', saveBody);
+  // 调用模型列表接口
+  const r = await apiGet('/api/admin/llm-models');
+  if (r.ok && r.models && r.models.length > 0) {
+    const sel = document.getElementById('cfgLlmModel');
+    const current = sel.value;
+    sel.innerHTML = r.models.map(m => '<option value="' + escapeHtml(m) + '">' + escapeHtml(m) + '</option>').join('');
+    if (Array.from(sel.options).some(o => o.value === current)) {
+      sel.value = current;
+    }
+    el.textContent = '✅ 获取到 ' + r.models.length + ' 个模型';
+  } else {
+    el.textContent = '❌ 获取失败: ' + (r.error || '未知错误');
+  }
+  setTimeout(() => el.textContent = '', 6000);
+}
+
+async function loadAntiStallConfig() {
+  try {
+    const data = await apiGet('/api/admin/anti-stall-config');
+    document.getElementById('cfgAntiStallEnabled').checked = data.enabled !== false;
+    document.getElementById('cfgAntiStallInterval').value = data.interval || 180;
+    document.getElementById('cfgAntiStallDanmaku').value = data.danmaku || 50;
+  } catch(e) {}
+}
+
+async function saveAntiStallConfig() {
+  try {
+    const enabled = document.getElementById('cfgAntiStallEnabled').checked;
+    const interval = parseInt(document.getElementById('cfgAntiStallInterval').value) || 180;
+    const danmaku = parseInt(document.getElementById('cfgAntiStallDanmaku').value) || 50;
+    const r = await apiPost('/api/admin/anti-stall-config', {enabled, interval, danmaku});
+    addLog(r.ok ? '✅ 防卡死设置已更新' : '❌ 保存失败');
+    if (r.ok) loadAntiStallConfig();
   } catch(e) { addLog('❌ 保存请求失败'); }
 }
 
-async function loadHintConfig() {
+// ── 游戏时长配置 ──
+async function loadGameConfig() {
   try {
-    const data = await apiGet('/api/admin/hint-config');
-    const hints = data.hints || [];
-    if (hints[0]) document.getElementById('cfgHint0').value = hints[0];
-    if (hints[1]) document.getElementById('cfgHint1').value = hints[1];
-    if (hints[2]) document.getElementById('cfgHint2').value = hints[2];
+    const data = await apiGet('/api/admin/game-config');
+    const minutes = Math.round((data.roundTimeout || 300) / 60);
+    document.getElementById('cfgGameDuration').value = minutes;
   } catch(e) {}
 }
 
-async function saveHintConfig() {
+async function saveGameConfig() {
   try {
-    const h0 = document.getElementById('cfgHint0').value.trim();
-    const h1 = document.getElementById('cfgHint1').value.trim();
-    const h2 = document.getElementById('cfgHint2').value.trim();
-    if (!h0 || !h1 || !h2) { addLog('❌ 提示文本不能为空'); return; }
-    const r = await apiPost('/api/admin/hint-config', { hints: [h0, h1, h2] });
-    addLog(r.ok ? '✅ 提示文本已更新' : '❌ 保存失败');
-    if (r.ok) loadHintConfig();
+    const minutes = parseInt(document.getElementById('cfgGameDuration').value) || 5;
+    const seconds = minutes * 60;
+    const r = await apiPost('/api/admin/game-config', {roundTimeout: seconds});
+    const status = document.getElementById('cfgGameDurationStatus');
+    if (r.ok) {
+      status.textContent = '✅ 已保存 (' + minutes + '分钟)';
+      addLog('⏱ 游戏时长已设为 ' + minutes + ' 分钟');
+      loadGameConfig();
+    } else {
+      status.textContent = '❌ 保存失败';
+    }
+    setTimeout(() => status.textContent = '', 5000);
   } catch(e) { addLog('❌ 保存请求失败'); }
 }
 
@@ -672,7 +786,7 @@ async function runDiagnostic() {
   addLog('🔍 开始诊断 (v' + ADMIN_VERSION + ')...');
   const endpoints = [
     '/api/admin/slots', '/api/admin/soups', '/api/admin/themes',
-    '/api/admin/banned-words', '/api/admin/hint-config', '/api/admin/like-config',
+    '/api/admin/banned-words', '/api/admin/anti-stall-config',
     '/api/admin/metrics', '/api/theme'
   ];
   for (const ep of endpoints) {
@@ -701,11 +815,16 @@ function renderSlots() {
   document.getElementById('slotGrid').innerHTML = currentSlots.map(s =>
     '<div class="slot-card ' + (s.enabled?'':'disabled') + '">' +
     '<div class="group-tag ' + s.group + '">' + (s.group==='effect'?'效果':'难度') + '</div>' +
-    '<div class="icon">' + (s.gift_icon ? '<img src="'+escapeHtml(s.gift_icon)+'" style="width:36px;height:36px;object-fit:contain;border-radius:6px" alt="">' : '🎁') + '</div>' +
-    '<div class="name">' + escapeHtml(s.gift_name||'未绑定') + '</div>' +
+    '<div class="icon' + (s.like_mode?' like-mode-gift':'') + '">' + (s.gift_icon ?
+      '<img src="'+escapeHtml(s.gift_icon)+'" style="width:36px;height:36px;object-fit:contain;border-radius:6px" alt="">' :
+      '🎁') +
+    (s.like_mode ? '<div class="like-mode-overlay">👍 点赞</div>' : '') + '</div>' +
+    '<div class="name' + (s.like_mode?' dimmed':'') + '">' + escapeHtml(s.gift_name||'未绑定') + '</div>' +
     '<div class="desc">' + escapeHtml(s.name) + '<br>' + escapeHtml(s.desc) + '</div>' +
-    '<div style="display:flex;gap:4px;margin-top:6px;justify-content:center">' +
+    (s.like_mode ? '<div class="like-badge">👍 点赞模式('+s.like_threshold+'次)</div>' : '') +
+    '<div style="display:flex;gap:4px;margin-top:6px;justify-content:center;flex-wrap:wrap">' +
     '<button class="btn btn-sm" onclick="editSlot(\''+s.id+'\')" style="font-size:10px;padding:2px 8px;background:rgba(0,212,255,0.1);border:1px solid rgba(0,212,255,0.2);color:#00d4ff;border-radius:4px;cursor:pointer">绑定</button>' +
+    '<button class="btn btn-sm" onclick="toggleSlotLike(\''+s.id+'\','+(!s.like_mode)+')" style="font-size:10px;padding:2px 8px;background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.2);color:#f59e0b;border-radius:4px;cursor:pointer">'+(s.like_mode?'取消点赞':'点赞')+'</button>' +
     '<button class="btn btn-sm" onclick="toggleSlot(\''+s.id+'\','+(!s.enabled)+')" style="font-size:10px;padding:2px 8px;background:'+(s.enabled?'rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.2);color:#ef4444':'rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.2);color:#22c55e')+';border-radius:4px;cursor:pointer">'+(s.enabled?'禁用':'启用')+'</button>' +
     '</div>' +
     '</div>'
@@ -746,6 +865,19 @@ async function pickGift(name) {
   if (!currentSlotEditing) return;
   await apiPost('/api/admin/slots/assign', {slot_id: currentSlotEditing, gift_name: name});
   closePicker();
+  loadSlots();
+}
+
+// 点赞模式切换（带阈值配置弹窗）
+async function toggleSlotLike(slotId, enable) {
+  if (enable) {
+    const threshold = prompt('输入点赞累积次数阈值（达到后揭示一字，默认500）:', '500');
+    if (threshold === null) return;
+    const t = parseInt(threshold) || 500;
+    await apiPost('/api/admin/slots/like-config', {slot_id: slotId, like_mode: true, like_threshold: t});
+  } else {
+    await apiPost('/api/admin/slots/like-config', {slot_id: slotId, like_mode: false, like_threshold: 500});
+  }
   loadSlots();
 }
 
@@ -884,8 +1016,9 @@ setInterval(refreshMetrics, 60000);
 // 启动
 connect();
 refreshDiffGrid();
-loadLikeConfig();
-loadHintConfig();
+loadAntiStallConfig();
+loadLlmConfig();
+loadGameConfig();
 
 async function loadThemes() {
   const data = await apiGet('/api/admin/themes');
@@ -988,7 +1121,8 @@ function switchTab(el) {
       return;
     }
     // 加载对应数据
-    if (tabId==='slots') { loadSlots(); loadHintConfig(); }
+    if (tabId==='game') { loadGameConfig(); }
+    if (tabId==='slots') { loadSlots(); loadAntiStallConfig(); }
     if (tabId==='soup') loadSoupList();
     if (tabId==='theme') loadThemes();
     if (tabId==='security') loadBannedWords();

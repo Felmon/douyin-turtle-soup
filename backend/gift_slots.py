@@ -11,16 +11,16 @@ from pathlib import Path
 SLOT_DEFINITIONS = [
     # 效果槽（5个）
     {"id": "effect_highlight", "group": "effect", "name": "高亮线索", "desc": "高亮一个未揭示的关键字", "default_gift": "小心心"},
-    {"id": "effect_hint",      "group": "effect", "name": "方向提示", "desc": "LLM生成解谜方向提示", "default_gift": "人气票"},
+    {"id": "effect_hint",      "group": "effect", "name": "方向提示", "desc": "揭示解谜方向提示（固定文本）", "default_gift": "人气票"},
     {"id": "effect_reveal1",   "group": "effect", "name": "揭示一字",  "desc": "随机揭示一个高频实词字", "default_gift": "啤酒"},
     {"id": "effect_reveal_sentence", "group": "effect", "name": "揭示一句", "desc": "揭示完整一句话", "default_gift": "棒棒糖"},
     {"id": "effect_reveal_30p","group": "effect", "name": "揭示30%",  "desc": "立即揭示30%的未揭示内容", "default_gift": "墨镜"},
     # 难度槽（5个）
-    {"id": "diff_easy",  "group": "difficulty", "name": "难度-简单", "desc": "下局切换为简单(30-50字)", "default_gift": "鲜花"},
-    {"id": "diff_medium","group": "difficulty", "name": "难度-一般", "desc": "下局切换为一般(50-80字)", "default_gift": "玫瑰"},
-    {"id": "diff_hard",  "group": "difficulty", "name": "难度-困难", "desc": "下局切换为困难(80-100字)", "default_gift": "跑车"},
-    {"id": "diff_hell",  "group": "difficulty", "name": "难度-地狱", "desc": "下局切换为地狱(100-120字)", "default_gift": "嘉年华"},
-    {"id": "diff_void",  "group": "difficulty", "name": "难度-无人区", "desc": "下局切换为无人区(120-150字)", "default_gift": "梦幻城堡"},
+    {"id": "diff_easy",  "group": "difficulty", "name": "难度-简单", "desc": "下局切换为简单（点赞≥300触发）", "default_gift": "鲜花"},
+    {"id": "diff_medium","group": "difficulty", "name": "难度-一般", "desc": "下局切换为一般（点赞≥500触发）", "default_gift": "玫瑰"},
+    {"id": "diff_hard",  "group": "difficulty", "name": "难度-困难", "desc": "下局切换为困难（点赞≥800触发）", "default_gift": "跑车"},
+    {"id": "diff_hell",  "group": "difficulty", "name": "难度-地狱", "desc": "下局切换为地狱（礼物：火箭/跑车）", "default_gift": "嘉年华"},
+    {"id": "diff_void",  "group": "difficulty", "name": "难度-无人区", "desc": "下局切换为无人区（礼物：城堡/钻石）", "default_gift": "梦幻城堡"},
 ]
 
 # ── 礼物库（从 gift_icons.json 加载） ──
@@ -123,14 +123,14 @@ class GiftSlotManager:
         return None
 
     def search_gifts(self, query: str) -> list[dict]:
-        """搜索礼物库（主播分配时用）。"""
+        """搜索礼物库（主播分配时用），按价值升序排列。"""
         q = query.lower().strip()
         if not q:
-            # 返回前50个
-            items = list(GIFT_LIBRARY.items())[:50]
-            return [{"name": k, "coins": v.get("coins", 0), "icon": v.get("icon", "")} for k, v in items]
-        items = [(k, v) for k, v in GIFT_LIBRARY.items() if q in k.lower()]
-        items = items[:50]
+            items = sorted(GIFT_LIBRARY.items(), key=lambda x: x[1].get("coins", 0))
+            items = items[:50]
+        else:
+            items = [(k, v) for k, v in GIFT_LIBRARY.items() if q in k.lower()]
+            items = sorted(items, key=lambda x: x[1].get("coins", 0))[:50]
         return [{"name": k, "coins": v.get("coins", 0), "icon": v.get("icon", "")} for k, v in items]
 
 

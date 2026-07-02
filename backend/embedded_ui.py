@@ -1,4 +1,4 @@
-﻿"""嵌入式游戏 UI — Meoo 风格"""
+"""嵌入式游戏 UI — Meoo 风格"""
 import json
 
 EMBEDDED_HTML = r"""<!DOCTYPE html>
@@ -109,6 +109,13 @@ header{display:flex;align-items:center;justify-content:space-between;padding:12p
 .reveal-card{flex:1;position:relative;display:flex;flex-direction:column;min-height:0;overflow:hidden}
 .reveal-progress{position:absolute;top:10px;right:14px;font-size:12px;color:#64748b;display:flex;align-items:center;gap:6px;z-index:2}
 .reveal-progress span{color:#00d4ff;font-weight:700}
+.timer-display{position:absolute;top:10px;left:14px;font-size:12px;color:#64748b;display:flex;align-items:center;gap:5px;z-index:2}
+.timer-display .num{font-weight:700;font-variant-numeric:tabular-nums}
+.timer-display.normal .num{color:#00d4ff}
+.timer-display.warning .num{color:#fbbf24}
+.timer-display.danger .num{color:#ef4444;animation:pulse-dot 1s infinite}
+.auto-hint-toast{position:fixed;bottom:80px;left:50%;transform:translateX(-50%);z-index:98;padding:8px 18px;border-radius:10px;font-size:13px;text-align:center;pointer-events:none;opacity:0;transition:opacity 0.4s;max-width:80%;background:rgba(251,191,36,0.15);border:1px solid rgba(251,191,36,0.3);color:#fbbf24}
+.auto-hint-toast.show{opacity:1}
 .reveal-content{flex:1;display:flex;align-items:center;justify-content:center;padding:30px 20px 20px;overflow-y:auto}
 .reveal-text{font-size:22px;line-height:2.2;letter-spacing:2px;text-align:center;word-break:break-all}
 .reveal-text .ch{display:inline-block;transition:all 0.3s ease;margin:0 1px;animation:fadeIn 0.3s ease-out}
@@ -299,7 +306,8 @@ header{display:flex;align-items:center;justify-content:space-between;padding:12p
 <div class="glass" id="diffPanel" style="flex-shrink:0;padding:8px 12px;display:none">
 <div style="font-size:11px;color:#64748b;margin-bottom:2px">选择本局难度（影响积分倍率）</div>
 <div class="diff-row" id="diffRow">
-<div class="diff-btn active" data-diff="easy" onclick="pickDiff('easy')">简单<span class="mult">×1.0</span></div>
+<div class="diff-btn active" data-diff="auto" onclick="pickDiff('auto')">自适应<span class="mult">⚡</span></div>
+<div class="diff-btn" data-diff="easy" onclick="pickDiff('easy')">简单<span class="mult">×1.0</span></div>
 <div class="diff-btn" data-diff="medium" onclick="pickDiff('medium')">一般<span class="mult">×1.5</span></div>
 <div class="diff-btn" data-diff="hard" onclick="pickDiff('hard')">困难<span class="mult">×2.0</span></div>
 <div class="diff-btn" data-diff="hell" onclick="pickDiff('hell')">地狱<span class="mult">×3.0</span></div>
@@ -361,6 +369,7 @@ header{display:flex;align-items:center;justify-content:space-between;padding:12p
 
 <!-- Reveal Area -->
 <div class="reveal-card glass glass-primary" id="revealArea">
+<div class="timer-display normal" id="timerDisplay"><span id="timerIcon">⏱</span><span class="num" id="timerText">--:--</span></div>
 <div class="reveal-progress">揭示进度 <span id="progressText">0%</span></div>
 <div class="reveal-content">
 <div class="reveal-text" id="revealText"><div class="empty-state"><div class="icon">🐢</div>点击「开始游戏」开始新一局</div></div>
@@ -370,6 +379,7 @@ header{display:flex;align-items:center;justify-content:space-between;padding:12p
 <div class="gift-actions" id="giftActions" style="display:none">
 <button class="btn-gift gold" onclick="sendGift('人气票')">⚡方向提示</button>
 <button class="btn-gift gold" onclick="sendGift('啤酒')">🍺揭示一字</button>
+<button class="btn-gift gold" onclick="buyHint()">🔮购买提示</button>
 <button class="btn-gift purple" onclick="sendGift('墨镜')">🕶️通关</button>
 </div>
 </div>
@@ -434,6 +444,7 @@ header{display:flex;align-items:center;justify-content:space-between;padding:12p
 
 <!-- Gift Toast -->
 <div id="giftToast" class="gift-toast"></div>
+<div id="autoHintToast" class="auto-hint-toast"></div>
 
 <!-- Danmaku Input Bar -->
 <div class="glass" style="flex-shrink:0;padding:8px 12px;display:flex;gap:8px;align-items:center;margin-top:0">
@@ -503,6 +514,7 @@ function showGiftToast(msg){
     var effects={'popularity':'💡 方向引导提示','beer':'🔍 揭示一字','lollipop':'📖 揭示一句','sunglasses':'🏆 通关！','fan_light':'⭐ 揭示一句','like':'👍 点赞+1'};
     var effect=effects[gtype]||'';
     toast.textContent=icon+' '+user+' 送了 '+name+' '+effect;
+    if(msg.taunt){toast.textContent+=' — '+msg.taunt}
     toast.className='gift-toast '+(gtype||'');
     setTimeout(function(){toast.classList.add('show')},10);
     clearTimeout(toast._hide);
@@ -609,6 +621,17 @@ function handle(msg){
             document.getElementById('qaCount').textContent='0 条';
             document.getElementById('contribList').innerHTML='<div style="color:#334155;font-size:11px;text-align:center;padding:4px">暂无贡献</div>';
             docReady=true;
+            break;
+        case 'timer':
+            updateTimer(msg.remaining);
+            break;
+        case 'auto_hint':
+            showAutoHint(msg.text, msg.revealed);
+            break;
+        case 'progressive_hint':
+            var _levelNames=['🔮 方向引导','🔮 关键词提示','🔮 半答案提示'];
+            var _levelName=_levelNames[msg.level]||'💡 提示';
+            showAutoHint(_levelName+': '+msg.hint, '');
             break;
         case 'reveal_update':
             if(msg.charStates){
@@ -735,6 +758,10 @@ function sendGift(name){
     if(ws&&ws.readyState===1)ws.send(JSON.stringify({type:'gift',giftName:name,nickname:'default',diamondCount:0}));
     else alert('请先连接服务器');
 }
+function buyHint(){
+    if(ws&&ws.readyState===1)ws.send(JSON.stringify({type:'buy_hint',user:'观众'}));
+    else alert('请先连接服务器');
+}
 function addContrib(user,n){
     if(!contribs[user])contribs[user]=0;
     contribs[user]+=n;
@@ -775,7 +802,7 @@ function sendDanmaku(){
 function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
 
 // ── 难度选择 ──
-let currentDiff='easy';
+let currentDiff='auto';
 function pickDiff(d){
   currentDiff=d;
   document.querySelectorAll('#diffRow .diff-btn').forEach(b=>b.classList.toggle('active',b.dataset.diff===d));
@@ -1007,6 +1034,31 @@ connectWS();
     window.addEventListener('resize',resize);
     init();draw();
 })();
+
+// ── 倒计时 ──
+function updateTimer(remaining) {
+  const el = document.getElementById("timerText");
+  const display = document.getElementById("timerDisplay");
+  if (remaining == null || remaining < 0) { el.textContent = "--:--"; return; }
+  const m = Math.floor(remaining / 60);
+  const s = remaining % 60;
+  el.textContent = String(m).padStart(2,"0") + ":" + String(s).padStart(2,"0");
+  display.className = "timer-display";
+  if (remaining <= 30) display.classList.add("danger");
+  else if (remaining <= 60) display.classList.add("warning");
+  else display.classList.add("normal");
+}
+
+// ── 自动提示 ──
+function showAutoHint(text, revealedChar) {
+  const el = document.getElementById("autoHintToast");
+  el.textContent = "💡 " + text;
+  el.className = "auto-hint-toast";
+  setTimeout(() => el.classList.add("show"), 10);
+  clearTimeout(el._hide);
+  el._hide = setTimeout(() => el.classList.remove("show"), 4000);
+}
+
 </script>
 </body>
 </html>"""

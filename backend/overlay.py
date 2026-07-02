@@ -91,6 +91,8 @@ body{color:var(--text);
 .progress-markers .marker{position:absolute;top:-3px;width:2px;height:11px;background:var(--primary);transform:translateX(-50%);border-radius:1px}
 .progress-markers .marker.reached{background:var(--gold);box-shadow:0 0 6px var(--gold)}
 .progress-label{font-size:1.05vh;color:var(--gold);white-space:nowrap;min-width:3vw;text-align:right;font-weight:900}
+.like-icon{font-size:1.6vh;flex-shrink:0;line-height:1}
+.like-label{font-size:1.0vh;color:var(--text-dim);white-space:nowrap;flex-shrink:0;font-weight:600;margin-right:4px}
 /* 阈值效果标签（在进度条下方） */
 .like-thresholds{display:flex;position:relative;height:1.6vh;margin:0 0.5vw}
 .like-thresholds .tl{position:absolute;font-size:0.9vh;color:var(--text-dimmer);transform:translateX(-50%);white-space:nowrap;line-height:1.2;transition:color 0.3s,font-weight 0.3s}
@@ -108,8 +110,6 @@ body{color:var(--text);
 .surface-area::before{content:'';position:absolute;left:0;top:0;bottom:0;width:4px;
   background:linear-gradient(180deg,var(--primary),var(--purple));
   box-shadow:0 0 10px var(--primary)}
-.surface-area::after{content:'📖';position:absolute;right:2.5vw;top:50%;transform:translateY(-50%);
-  font-size:3vh;opacity:0.25}
 .surface-label{font-size:1.0vh;color:var(--primary);letter-spacing:3px;margin-bottom:0.4vh;
   display:flex;align-items:center;gap:6px;font-weight:700}
 .surface-label::before{content:'✦';color:var(--gold);font-size:1.4vh}
@@ -289,25 +289,27 @@ body{color:var(--text);
 .podium-item .tier-badge{font-size:0.9vh;padding:0.1vh 0.4vw;border-radius:4px;background:rgba(0,212,255,0.15);color:var(--primary)}
 .podium-item .score{font-size:1.1vh;color:var(--gold);font-weight:700}
 .podium-item .podium-stand{width:80%;height:1.2vh;border-radius:4px 4px 0 0;margin-top:0.2vh;flex-shrink:0}
-.podium-item.podium-1{background:linear-gradient(180deg,rgba(251,191,36,0.2),rgba(251,191,36,0.05));
+.podium-item.podium-1{flex:1.4;background:linear-gradient(180deg,rgba(251,191,36,0.2),rgba(251,191,36,0.05));
   border:1px solid rgba(251,191,36,0.3);padding-top:1.2vh}
 .podium-item.podium-1 .rank-icon{font-size:3.6vh}
-.podium-item.podium-1 .name{font-size:1.7vh}
+.podium-item.podium-1 .name{font-size:2.0vh}
 .podium-item.podium-1 .podium-stand{height:2.2vh;background:linear-gradient(180deg,#fbbf24,#b8860b);box-shadow:0 -2px 10px rgba(251,191,36,0.4)}
-.podium-item.podium-2{align-self:flex-end;background:linear-gradient(180deg,rgba(192,192,192,0.15),rgba(0,212,255,0.04));
+.podium-item.podium-2{flex:0.8;align-self:flex-end;background:linear-gradient(180deg,rgba(192,192,192,0.15),rgba(0,212,255,0.04));
   border:1px solid rgba(192,192,192,0.2);padding-bottom:0.8vh}
+.podium-item.podium-2 .name{font-size:1.3vh}
 .podium-item.podium-2 .podium-stand{height:1.6vh;background:linear-gradient(180deg,#c0c0c0,#808080);box-shadow:0 -2px 10px rgba(192,192,192,0.3)}
-.podium-item.podium-3{align-self:flex-end;background:linear-gradient(180deg,rgba(205,127,50,0.15),rgba(168,85,247,0.04));
+.podium-item.podium-3{flex:0.8;align-self:flex-end;background:linear-gradient(180deg,rgba(205,127,50,0.15),rgba(168,85,247,0.04));
   border:1px solid rgba(205,127,50,0.2);padding-bottom:0.4vh}
+.podium-item.podium-3 .name{font-size:1.3vh}
 .podium-item.podium-3 .podium-stand{height:1.0vh;background:linear-gradient(180deg,#cd7f32,#8b5a2b);box-shadow:0 -2px 10px rgba(205,127,50,0.3)}
 /* 排行榜第 4+ 可滚动 */
-.tier-rest{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:0.3vh;
+.tier-rest{flex:1;overflow-y:auto;display:grid;grid-template-columns:1fr 1fr;gap:0.3vh 1.5vw;align-content:start;
   scrollbar-width:thin}
 .tier-rest::-webkit-scrollbar{width:2px}
 .tier-rest::-webkit-scrollbar-thumb{background:rgba(0,212,255,0.2);border-radius:2px}
 .tier-item{display:flex;justify-content:space-between;align-items:center;
   font-size:1.3vh;padding:0.2vh 0}
-.tier-item .rank-num{color:var(--text-dim);width:3vw;font-weight:900;font-size:1.2vh}
+.tier-item .rank-num{color:var(--text-dim);width:2vw;font-weight:900;font-size:1.2vh}
 .tier-item .rank-num.top{color:var(--gold)}
 .tier-item .name{flex:1;color:var(--text);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tier-item .tier-badge{font-size:1vh;padding:0.1vh 0.8vw;border-radius:4px;
@@ -504,6 +506,8 @@ body{color:var(--text);
     </div>
     <div class="like-progress" id="likeProgress">
       <div class="like-progress-row">
+        <span class="like-icon">👍</span>
+        <span class="like-label">点赞解锁</span>
         <div class="progress-track">
           <div class="like-fill" id="likeFill"></div>
           <div class="progress-markers" id="likeMarkers"></div>
@@ -1158,19 +1162,19 @@ function renderTierList(list) {
   const podiumOrder = top3.length >= 2
     ? [top3[1], top3[0], top3[2]]  // 金银铜 → 银金银铜? No: [2nd, 1st, 3rd]
     : top3;
-  // 重新排：索引0→银, 1→金, 2→铜
+  // 重新排：索引0→银(左), 1→金(中), 2→铜(右)
   let ordered;
   if (top3.length === 1) {
     ordered = [{item: top3[0], cls: 'podium-1', icon: '🥇'}];
   } else if (top3.length === 2) {
     ordered = [
-      {item: top3[1], cls: 'podium-1', icon: '🥇'},
-      {item: top3[0], cls: 'podium-2', icon: '🥈'},
+      {item: top3[1], cls: 'podium-2', icon: '🥈'},
+      {item: top3[0], cls: 'podium-1', icon: '🥇'},
     ];
   } else {
     ordered = [
-      {item: top3[1], cls: 'podium-1', icon: '🥇'},
-      {item: top3[0], cls: 'podium-2', icon: '🥈'},
+      {item: top3[1], cls: 'podium-2', icon: '🥈'},
+      {item: top3[0], cls: 'podium-1', icon: '🥇'},
       {item: top3[2], cls: 'podium-3', icon: '🥉'},
     ];
   }
@@ -1178,7 +1182,6 @@ function renderTierList(list) {
     '<div class="podium-item ' + o.cls + '">' +
     '<div class="rank-icon">' + o.icon + '</div>' +
     '<div class="name">' + escapeHtml(o.item.name) + '</div>' +
-    (o.item.tier ? '<span class="tier-badge">' + escapeHtml(o.item.tierEmoji) + ' ' + escapeHtml(o.item.tier) + '</span>' : '') +
     (o.item.score ? '<span class="score">' + o.item.score + '</span>' : '') +
     '<div class="podium-stand"></div>' +
     '</div>'

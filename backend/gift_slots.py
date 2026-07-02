@@ -142,6 +142,27 @@ class GiftSlotManager:
         with self._lock:
             return dict(self._slots.get(slot_id, {})) if slot_id in self._slots else None
 
+    def save_to_db(self, db):
+        """将当前所有槽位状态持久化到 SQLite。"""
+        import json
+        with self._lock:
+            raw = json.dumps(self._slots, ensure_ascii=False)
+        db.set_setting("gift_slot_states", raw)
+
+    def load_from_db(self, db):
+        """从 SQLite 恢复槽位状态。"""
+        import json
+        raw = db.get_setting("gift_slot_states")
+        if raw:
+            try:
+                data = json.loads(raw)
+                with self._lock:
+                    for sid, state in data.items():
+                        if sid in self._slots:
+                            self._slots[sid].update(state)
+            except Exception as e:
+                print(f"[GiftSlots] 加载失败: {e}")
+
     def resolve_gift(self, gift_name: str) -> str | None:
         """根据收到的礼物名，返回匹配的槽位ID（效果或难度）。"""
         with self._lock:

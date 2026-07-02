@@ -72,8 +72,16 @@ ANTI_STALL_INTERVAL = 180
 ANTI_STALL_DANMAKU = 50
 ANTI_STALL_DECAY = 0.8
 ANTI_STALL_ENABLED = True
-ROUND_END_DELAY = 5
+AUTO_START_DELAY = 10
 ROUND_TIMEOUT = 300  # 每局最长秒数
+
+MOCK_LEADERBOARD = [
+    {"name": "抖音用户_8848", "score": 450},
+    {"name": "摸鱼小能手", "score": 320},
+    {"name": "吃瓜群众01", "score": 210},
+    {"name": "夜猫子剧场", "score": 150},
+    {"name": "路过打酱油", "score": 80},
+]
 
 FUNCTION_WORDS = {
     "的","了","是","在","和","吗","呢","吧","着","过","得","地","个","一","不","没",
@@ -183,6 +191,13 @@ if db is not None:
             print(f"[Config] 已加载游戏时长: {ROUND_TIMEOUT}秒")
     except Exception:
         pass
+# 从持久化存储恢复礼物槽状态
+if db is not None:
+    try:
+        slot_manager.load_from_db(db)
+        print("[GiftSlots] 已恢复槽位状态")
+    except Exception as e:
+        print(f"[GiftSlots] 加载失败: {e}")
 # OpenAI 客户端（懒加载）
 _client_instance = None
 def get_client():
@@ -343,6 +358,7 @@ class GameRoom:
         self.round_total = 0
         self.round_correct_times = []  # 每次答对耗时
         self.adaptive_bias = 0  # 累积偏移
+        self._auto_start_pending = False
     def to_dict(self):
         _, total, pct = RevealEngine.get_progress(self.char_states)
         return {
@@ -398,6 +414,10 @@ async def timer_tick_loop():
     while True:
         await asyncio.sleep(1)
         try:
+            # 自动开始检测：游戏结束后安排延迟开始
+            if room.phase == "complete" and not room._auto_start_pending:
+                room._auto_start_pending = True
+                asyncio.create_task(auto_start_after_delay())
             if not room.soup_answer or room.phase in ("idle", "complete", "lobby"):
                 continue
             elapsed = time.time() - room.start_time
@@ -417,6 +437,18 @@ async def timer_tick_loop():
                 await manager.broadcast({"type": "game_end", "winner": "系统", "charStates": room.char_states})
         except Exception as e:
             print(f"[Timer] Error: {e}")
+
+async def auto_start_after_delay():
+    """游戏结束后等待 N 秒，自动开始下一局。"""
+    await asyncio.sleep(AUTO_START_DELAY)
+    try:
+        if room.phase == "complete":
+            print("[AutoStart] 自动开始下一局")
+            await game_start("auto")
+    except Exception as e:
+        print(f"[AutoStart] Error: {e}")
+    finally:
+        room._auto_start_pending = False
 
 async def anti_stall_loop():
     """后备防卡死：弹幕冷场时自动揭示。"""
@@ -609,6 +641,7 @@ async def game_start(difficulty: str = "medium"):
     room.char_states = RevealEngine.init_char_states(room.soup_answer)
     room.phase = "reading"
     room.start_time = time.time()
+    room.anti_last_reveal = room.start_time
     room.remaining = room.round_timeout
     await manager.broadcast({
         "type": "game_start", "surface": room.soup_text,
@@ -709,13 +742,22 @@ async def leaderboard(limit: int = 10):
     if db is None:
         return {"leaderboard": [], "source": "memory"}
     users = db.get_top_users(limit)
-    return {"leaderboard": [
+    # 始终将假数据与真人数据合并，真人按分数排在前面
+    mock_list = [
+        {"name": u["name"], "score": u["score"],
+         "tier": get_tier(u["score"]),
+         "combo": 0, "total_gifts": 0}
+        for u in MOCK_LEADERBOARD
+    ]
+    real_list = [
         {"name": u["name"], "score": u.get("score", 0),
          "tier": get_tier(u.get("score", 0)),
          "combo": u.get("combo", 0),
          "total_gifts": u.get("total_gifts", 0)}
         for u in users
-    ], "source": "db"}
+    ]
+    merged = sorted(real_list + mock_list, key=lambda x: x["score"], reverse=True)[:limit]
+    return {"leaderboard": merged, "source": "mixed" if real_list else "mock"}
 
 # ── 礼物别名 API ──
 @app.get("/api/gift/aliases")
@@ -1146,6 +1188,8 @@ class AssignSlotReq(BaseModel):
 @app.post("/api/admin/slots/assign")
 async def assign_slot(req: AssignSlotReq):
     slot_manager.assign_gift(req.slot_id, req.gift_name)
+    if db is not None:
+        slot_manager.save_to_db(db)
     await manager.broadcast({"type": "slots_updated"})
     return {"ok": True}
 
@@ -1156,6 +1200,8 @@ class ToggleSlotReq(BaseModel):
 @app.post("/api/admin/slots/toggle")
 async def toggle_slot(req: ToggleSlotReq):
     slot_manager.set_enabled(req.slot_id, req.enabled)
+    if db is not None:
+        slot_manager.save_to_db(db)
     await manager.broadcast({"type": "slots_updated"})
     return {"ok": True}
 
@@ -1167,6 +1213,8 @@ class SlotLikeConfigReq(BaseModel):
 @app.post("/api/admin/slots/like-config")
 async def set_slot_like_config(req: SlotLikeConfigReq):
     slot_manager.set_like_config(req.slot_id, req.like_mode, req.like_threshold)
+    if db is not None:
+        slot_manager.save_to_db(db)
     await manager.broadcast({"type": "slots_updated"})
     return {"ok": True}
 

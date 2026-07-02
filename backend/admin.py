@@ -9,6 +9,9 @@ ADMIN_HTML = r"""<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <title>海龟汤 · 控制台</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
@@ -16,18 +19,27 @@ body{background:#0c0f1e;color:#e2e8f0;font-family:-apple-system,'PingFang SC','M
 
 .app{max-width:1400px;margin:0 auto;display:flex;flex-direction:column;gap:12px}
 
-.header{display:flex;align-items:center;justify-content:space-between;padding:14px 20px;background:rgba(18,22,48,0.6);border-radius:12px;border:1px solid rgba(255,255,255,0.06)}
-.header h1{font-size:18px;background:linear-gradient(135deg,#e2e8f0,#94a3b8);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
-.header-actions{display:flex;gap:8px}
+.header{display:flex;align-items:center;justify-content:space-between;padding:14px 20px;background:rgba(18,22,48,0.6);border-radius:12px;border:1px solid rgba(255,255,255,0.06);gap:16px}
+.header .brand{display:flex;align-items:center;gap:12px}
+.header .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,#00d4ff,#7c3aed);display:flex;align-items:center;justify-content:center;font-size:22px;box-shadow:0 4px 14px rgba(0,212,255,0.3);flex-shrink:0}
+.header .brand-text{display:flex;flex-direction:column;line-height:1.2}
+.header h1{font-size:16px;background:linear-gradient(135deg,#e2e8f0,#94a3b8);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin:0}
+.header .brand-sub{font-size:11px;color:#64748b;margin-top:2px}
+.header-actions{display:flex;gap:8px;align-items:center}
 
 .btn{padding:6px 14px;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;transition:all 0.2s;display:inline-flex;align-items:center;gap:5px}
-.btn-primary{background:linear-gradient(135deg,#00d4ff,#7c3aed);color:#fff}
-.btn-primary:hover{box-shadow:0 4px 16px rgba(0,212,255,0.35)}
+.btn-primary{background:linear-gradient(135deg,#22c55e,#16a34a);color:#fff;box-shadow:0 2px 8px rgba(34,197,94,0.25)}
+.btn-primary:hover{box-shadow:0 4px 16px rgba(34,197,94,0.45);transform:translateY(-1px)}
+.btn-cyan{background:linear-gradient(135deg,#00d4ff,#0ea5e9);color:#fff;box-shadow:0 2px 8px rgba(0,212,255,0.25)}
+.btn-cyan:hover{box-shadow:0 4px 16px rgba(0,212,255,0.45);transform:translateY(-1px)}
+.btn-warn{background:linear-gradient(135deg,#fbbf24,#f59e0b);color:#000;box-shadow:0 2px 8px rgba(251,191,36,0.25)}
+.btn-warn:hover{box-shadow:0 4px 16px rgba(251,191,36,0.45);transform:translateY(-1px)}
 .btn-ghost{background:rgba(255,255,255,0.05);color:#94a3b8}
 .btn-ghost:hover{background:rgba(255,255,255,0.1);color:#e2e8f0}
 .btn-success{background:#22c55e;color:#fff}
 .btn-warning{background:#fbbf24;color:#000}
-.btn-danger{background:#ef4444;color:#fff}
+.btn-danger{background:linear-gradient(135deg,#ef4444,#dc2626);color:#fff;box-shadow:0 2px 8px rgba(239,68,68,0.25)}
+.btn-danger:hover{box-shadow:0 4px 16px rgba(239,68,68,0.45);transform:translateY(-1px)}
 .btn-sm{padding:4px 10px;font-size:11px}
 
 .tabs{display:flex;gap:4px;padding:4px;background:rgba(18,22,48,0.4);border-radius:10px;width:fit-content}
@@ -54,7 +66,7 @@ body{background:#0c0f1e;color:#e2e8f0;font-family:-apple-system,'PingFang SC','M
 .char-cell.hidden::after{content:'';position:absolute;width:60%;height:2px;background:rgba(100,116,139,0.4);border-radius:1px}
 .char-cell.function{color:#64748b;font-size:11px}
 
-.diff-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:12px}
+.diff-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-bottom:12px}
 .diff-btn{padding:12px;border:1px solid rgba(255,255,255,0.1);background:rgba(0,0,0,0.3);border-radius:8px;cursor:pointer;transition:all 0.2s;text-align:center}
 .diff-btn:hover{border-color:#00d4ff;background:rgba(0,212,255,0.1)}
 .diff-btn.active{border-color:#00d4ff;background:rgba(0,212,255,0.15);box-shadow:0 0 16px rgba(0,212,255,0.2)}
@@ -120,27 +132,36 @@ textarea{width:100%;min-height:80px;resize:vertical}
 .chart-wrap{position:relative;height:140px}
 .chart-tooltip{position:absolute;display:none;background:rgba(0,0,0,0.85);color:#e2e8f0;padding:6px 10px;border-radius:6px;font-size:11px;pointer-events:none;white-space:nowrap;z-index:10;border:1px solid rgba(255,255,255,0.1);backdrop-filter:blur(4px)}
 canvas{max-width:100%}
+
+/* 礼物槽位卡片 */
 </style>
 </head>
 <body>
 
 <div class="app">
   <div class="header">
-    <h1>🐢 海龟汤 · 主播控制台</h1>
+    <div class="brand">
+      <div class="logo">🐢</div>
+      <div class="brand-text">
+        <h1>海龟汤 · 主播控制台</h1>
+        <div class="brand-sub">房间号: <span id="roomId">--</span> · <span id="statusInfo">● 空闲中</span></div>
+      </div>
+    </div>
     <div class="header-actions">
-      <span class="btn btn-ghost" id="statusInfo">● 空闲中</span>
-      <button class="btn btn-ghost" onclick="window.open('/overlay','_blank')">📺 投屏</button>
-      <button class="btn btn-ghost" onclick="window.open('/dashboard','_blank')">📊 数据</button>
+      <button class="btn btn-cyan" onclick="window.open('/overlay','_blank')">📺 投屏</button>
+      <button class="btn btn-ghost" onclick="reloadConfig()">🔄 重载</button>
+      <button class="btn btn-ghost" onclick="runDiagnostic()" title="检查API连通性">🔍 诊断</button>
     </div>
   </div>
 
   <div class="tabs">
-    <div class="tab active" data-tab="game">🎮 游戏控制</div>
-    <div class="tab" data-tab="slots">🎁 礼物槽位</div>
-    <div class="tab" data-tab="soup">📚 题库管理</div>
-    <div class="tab" data-tab="ai">🤖 AI 出题</div>
-    <div class="tab" data-tab="data">📈 数据</div>
-    <div class="tab" data-tab="theme">🎨 主题</div>
+    <div class="tab active" data-tab="game" onclick="switchTab(this)">🎮 游戏控制</div>
+    <div class="tab" data-tab="slots" onclick="switchTab(this)">🎁 礼物槽位</div>
+    <div class="tab" data-tab="soup" onclick="switchTab(this)">📚 题库管理</div>
+    <div class="tab" data-tab="ai" onclick="switchTab(this)">🤖 AI 出题</div>
+    <div class="tab" data-tab="data" onclick="switchTab(this)">📈 数据</div>
+    <div class="tab" data-tab="theme" onclick="switchTab(this)">🎨 主题</div>
+    <div class="tab" data-tab="security" onclick="switchTab(this)">🔒 安全设置</div>
   </div>
 
   <!-- 游戏控制 -->
@@ -164,12 +185,19 @@ canvas{max-width:100%}
           <h2>难度选择（5档）</h2>
           <div class="diff-grid" id="diffGrid"></div>
           <div style="font-size:11px;color:#64748b;margin-top:6px">当前难度：<span id="curDiff" style="color:#00d4ff;font-weight:600">-</span></div>
-          <div style="font-size:11px;color:#64748b;margin-top:4px">局数：<span id="adminRoundCount" style="color:#22c55e">0</span> &nbsp;|&nbsp; 时长：<span id="adminDuration" style="color:#22c55e">00:00</span></div>
+          <div style="display:flex;gap:12px;margin-bottom:6px;font-size:11px;color:#64748b">
+            <span>⏱ 剩余：<span id="adminTimer" style="color:#00d4ff;font-weight:700">--:--</span></span>
+            <span>局数：<span id="adminRoundCount" style="color:#22c55e">0</span></span>
+            <span>时长：<span id="adminDuration" style="color:#22c55e">00:00</span></span>
+          </div>
+          <button class="btn btn-ghost btn-sm" onclick="reloadConfig()" style="margin-top:6px">🔄 重载配置</button>
         </div>
       </div>
 
-      <div>
-        <div class="section">
+      <div style="margin-top:12px" class="section">
+
+        <div>
+          <div class="section">
           <h2>谜底揭示</h2>
           <div class="char-grid" id="charGrid"></div>
           <div style="margin-top:8px;font-size:11px;color:#64748b">
@@ -186,14 +214,36 @@ canvas{max-width:100%}
         </div>
       </div>
     </div>
+
+
   </div>
+</div>
 
   <!-- 礼物槽位 -->
   <div class="tab-content" id="tab-slots">
     <div class="section">
       <h2>10个固定槽位（5效果 + 5难度）</h2>
-      <div style="font-size:11px;color:#64748b;margin-bottom:12px">点击槽位从368+抖音礼物中选择绑定。已选择的礼物在直播间送礼即触发对应效果。</div>
+      <div style="font-size:11px;color:#64748b;margin-bottom:12px">点击槽位从368+抖音礼物中选择绑定。已绑定的礼物在直播间送礼即触发对应效果。点击槽位右上角可启用/禁用。</div>
       <div class="slot-grid" id="slotGrid"></div>
+    </div>
+    <div style="margin-top:12px" class="section">
+      <h2>点赞阈值设置 <span style="font-size:11px;color:#64748b;font-weight:normal">揭示阈值 · 难度门槛</span></h2>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:8px">
+        <label style="font-size:11px;color:#94a3b8">揭示: <input id="cfgRevealThreshold" type="number" value="500" style="width:60px;padding:4px 6px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.1);border-radius:4px;color:#e2e8f0;font-size:12px"></label>
+        <label style="font-size:11px;color:#94a3b8">→简单: <input id="cfgEasyThreshold" type="number" value="300" style="width:55px;padding:4px 6px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.1);border-radius:4px;color:#e2e8f0;font-size:12px"></label>
+        <label style="font-size:11px;color:#94a3b8">→一般: <input id="cfgMediumThreshold" type="number" value="500" style="width:55px;padding:4px 6px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.1);border-radius:4px;color:#e2e8f0;font-size:12px"></label>
+        <label style="font-size:11px;color:#94a3b8">→困难: <input id="cfgHardThreshold" type="number" value="800" style="width:55px;padding:4px 6px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.1);border-radius:4px;color:#e2e8f0;font-size:12px"></label>
+        <button class="btn btn-sm" onclick="saveLikeConfig()" style="background:rgba(0,212,255,0.15);border:1px solid rgba(0,212,255,0.3);color:#00d4ff;padding:4px 12px;border-radius:4px;cursor:pointer">保存</button>
+      </div>
+    </div>
+    <div style="margin-top:12px" class="section">
+      <h2>三级提示文本 <span style="font-size:11px;color:#64748b;font-weight:normal">购买/槽位触发的渐进提示</span></h2>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:8px">
+        <label style="font-size:11px;color:#94a3b8">Level 1: <input id="cfgHint0" type="text" value="想想故事里谁最可疑？" style="width:180px;padding:4px 6px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.1);border-radius:4px;color:#e2e8f0;font-size:12px"></label>
+        <label style="font-size:11px;color:#94a3b8">Level 2: <input id="cfgHint1" type="text" value="注意这个关键词能帮你理清思路" style="width:180px;padding:4px 6px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.1);border-radius:4px;color:#e2e8f0;font-size:12px"></label>
+        <label style="font-size:11px;color:#94a3b8">Level 3: <input id="cfgHint2" type="text" value="答案中隐藏的关键点已经很明显了" style="width:180px;padding:4px 6px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.1);border-radius:4px;color:#e2e8f0;font-size:12px"></label>
+        <button class="btn btn-sm" onclick="saveHintConfig()" style="background:rgba(0,212,255,0.15);border:1px solid rgba(0,212,255,0.3);color:#00d4ff;padding:4px 12px;border-radius:4px;cursor:pointer">保存</button>
+      </div>
     </div>
   </div>
 
@@ -267,6 +317,26 @@ canvas{max-width:100%}
       <div id="themeGrid" class="theme-grid"></div>
     </div>
   </div>
+
+  <!-- 安全设置 -->
+  <div class="tab-content" id="tab-security">
+    <div class="section">
+      <h2>屏蔽词管理 <button class="btn btn-ghost btn-sm" onclick="addBannedWord()" style="float:right">+ 添加</button></h2>
+      <div style="font-size:11px;color:#64748b;margin-bottom:12px">命中屏蔽词的弹幕将被静默丢弃，不触发任何效果。当前 <span id="bannedCount" style="color:#fbbf24;font-weight:600">0</span> 条。</div>
+      <div id="bannedWordList" style="max-height:400px;overflow-y:auto"></div>
+    </div>
+    <div class="section" style="margin-top:20px">
+      <h2>弹幕过滤策略</h2>
+      <div style="padding:12px;background:rgba(0,0,0,0.3);border-radius:8px;font-size:12px;color:#94a3b8;line-height:1.8">
+        <div style="display:grid;grid-template-columns:auto 1fr auto;gap:8px 16px">
+          <span style="color:#00d4ff">1.</span><span>格式过滤：弹幕超过30字、纯数字/纯表情 → 丢弃</span><span style="color:#22c55e">✓</span>
+          <span style="color:#00d4ff">2.</span><span>频率限制：每用户5秒上限5条、全局每秒10条、重复≥3 → 丢弃</span><span style="color:#22c55e">✓</span>
+          <span style="color:#00d4ff">3.</span><span>内容过滤：玩家弹幕匹配屏蔽词 → 丢弃；LLM提示含「答案是/汤底是」→ 丢弃重试</span><span style="color:#22c55e">✓</span>
+        </div>
+        <div style="margin-top:8px;color:#64748b;font-size:10px">所有拦截均静默处理，玩家无感知。</div>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- 礼物选择器 -->
@@ -300,6 +370,12 @@ canvas{max-width:100%}
 </div>
 
 <script>
+// ═══════════════════════════════════════════
+// 管理面板 v7.5 — 2026-07-01
+// ═══════════════════════════════════════════
+const ADMIN_VERSION = '7.5-20260701';
+console.log('[Admin] 版本:', ADMIN_VERSION, '加载完成');
+
 const wsUrl = (location.protocol==='https:'?'wss:':'ws:')+'//'+location.host+'/ws';
 let ws = null;
 let currentSlots = [];
@@ -317,9 +393,16 @@ function connect() {
 
 function handleMessage(msg) {
   switch(msg.type) {
-    case 'state_sync': updateGameState(msg.room); break;
+    case 'state_sync':
+      updateGameState(msg.room);
+      if (msg.room && msg.room.room_id) {
+        const el = document.getElementById('roomId');
+        if (el) el.textContent = msg.room.room_id;
+      }
+      break;
     case 'game_start': updateGameState({surface: msg.surface, charStates: msg.charStates, difficulty: msg.difficulty, phase: msg.phase || 'reading'}); break;
     case 'reveal_update': updateCharStates(msg.charStates); break;
+    case 'timer': updateTimer(msg.remaining); break;
     case 'game_end': document.getElementById('statusInfo').textContent='● 已结束'; break;
     case 'difficulty_scheduled': if(msg.nextDifficulty) updateGameState({difficulty: msg.nextDifficulty}); break;
     case 'classification': addLog(msg.user + ': ' + msg.text + ' -> ' + msg.answerType); break;
@@ -327,7 +410,7 @@ function handleMessage(msg) {
     case 'tier_up': addLog('⬆ ' + msg.user + ' 升级到 ' + (msg.to_tier?.name||'')); break;
     case 'score_update': addLog('📊 ' + msg.user + ' 积分: ' + msg.score); break;
     case 'hint': addLog('💡 提示: ' + (msg.hint||'')); break;
-    case 'slots_updated': loadSlots(); break;
+    case 'slots_updated': loadSlots(); loadHintConfig(); break;
     case 'metrics_update': updateMetrics(msg.metrics); break;
     case 'theme_change': loadThemes(); break;
   }
@@ -444,6 +527,8 @@ function adminDrawChart(id, data, color, label) {
   canvas._chartData = { sliced, max, step, pad, plotH, color, label: label || '' };
 }
 
+
+
 async function refreshMetrics() {
   try {
     const data = await apiGet('/api/admin/metrics');
@@ -451,12 +536,74 @@ async function refreshMetrics() {
   } catch(e) {}
 }
 
+function updateTimer(remaining) {
+  const el = document.getElementById('adminTimer');
+  if (remaining == null || remaining < 0) { el.textContent = '--:--'; return; }
+  const m = Math.floor(remaining / 60);
+  const s = remaining % 60;
+  el.textContent = String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
+}
+
+async function reloadConfig() {
+  try {
+    const r = await apiPost('/api/admin/config-reload', {});
+    addLog(r.ok ? '✅ 配置已重载' : '❌ 重载失败: ' + r.msg);
+  } catch(e) { addLog('❌ 重载请求失败'); }
+}
+
+async function loadLikeConfig() {
+  try {
+    const data = await apiGet('/api/admin/like-config');
+    document.getElementById('cfgRevealThreshold').value = data.revealThreshold || 500;
+    document.getElementById('cfgEasyThreshold').value = data.diffThresholds?.easy || 300;
+    document.getElementById('cfgMediumThreshold').value = data.diffThresholds?.medium || 500;
+    document.getElementById('cfgHardThreshold').value = data.diffThresholds?.hard || 800;
+  } catch(e) {}
+}
+
+async function saveLikeConfig() {
+  try {
+    const revealThreshold = parseInt(document.getElementById('cfgRevealThreshold').value) || 500;
+    const easy = parseInt(document.getElementById('cfgEasyThreshold').value) || 300;
+    const medium = parseInt(document.getElementById('cfgMediumThreshold').value) || 500;
+    const hard = parseInt(document.getElementById('cfgHardThreshold').value) || 800;
+    const r = await apiPost('/api/admin/like-config', {
+      revealThreshold: revealThreshold,
+      diffThresholds: { easy, medium, hard },
+    });
+    addLog(r.ok ? '✅ 点赞阈值已更新' : '❌ 保存失败');
+    if (r.ok) loadLikeConfig();
+  } catch(e) { addLog('❌ 保存请求失败'); }
+}
+
+async function loadHintConfig() {
+  try {
+    const data = await apiGet('/api/admin/hint-config');
+    const hints = data.hints || [];
+    if (hints[0]) document.getElementById('cfgHint0').value = hints[0];
+    if (hints[1]) document.getElementById('cfgHint1').value = hints[1];
+    if (hints[2]) document.getElementById('cfgHint2').value = hints[2];
+  } catch(e) {}
+}
+
+async function saveHintConfig() {
+  try {
+    const h0 = document.getElementById('cfgHint0').value.trim();
+    const h1 = document.getElementById('cfgHint1').value.trim();
+    const h2 = document.getElementById('cfgHint2').value.trim();
+    if (!h0 || !h1 || !h2) { addLog('❌ 提示文本不能为空'); return; }
+    const r = await apiPost('/api/admin/hint-config', { hints: [h0, h1, h2] });
+    addLog(r.ok ? '✅ 提示文本已更新' : '❌ 保存失败');
+    if (r.ok) loadHintConfig();
+  } catch(e) { addLog('❌ 保存请求失败'); }
+}
+
 function updateGameState(state) {
   if (state.surface) document.getElementById('curSurface').textContent = state.surface;
   if (state.charStates) updateCharStates(state.charStates);
   if (state.difficulty) {
     selectedDiff = state.difficulty;
-    document.getElementById('curDiff').textContent = state.difficulty;
+    document.getElementById('curDiff').textContent = state.difficulty_name || state.difficulty;
     refreshDiffGrid();
   }
   document.getElementById('statusInfo').textContent = '● ' + (state.phase || '空闲中');
@@ -486,6 +633,7 @@ function refreshDiffGrid() {
     {id:'hard', name:'困难', range:'80-100字', multi:'×2.0'},
     {id:'hell', name:'地狱', range:'100-120字', multi:'×3.0'},
     {id:'void', name:'无人区', range:'120-150字', multi:'×5.0'},
+    {id:'auto', name:'自适应', range:'AI 动态调整', multi:'⚡'},
   ];
   document.getElementById('diffGrid').innerHTML = diffs.map(d =>
     '<div class="diff-btn '+ (selectedDiff===d.id?'active':'') +'" onclick="setDiff(\''+d.id+'\')"><div class="name">'+d.name+'</div><div class="range">'+d.range+'</div><div class="multi">'+d.multi+'</div></div>'
@@ -519,6 +667,30 @@ function addLog(msg) {
 }
 function clearLog() { document.getElementById('logList').innerHTML = ''; }
 
+// ── 诊断工具 ──
+async function runDiagnostic() {
+  addLog('🔍 开始诊断 (v' + ADMIN_VERSION + ')...');
+  const endpoints = [
+    '/api/admin/slots', '/api/admin/soups', '/api/admin/themes',
+    '/api/admin/banned-words', '/api/admin/hint-config', '/api/admin/like-config',
+    '/api/admin/metrics', '/api/theme'
+  ];
+  for (const ep of endpoints) {
+    try {
+      const r = await fetch(ep);
+      const text = await r.text();
+      const len = text.length;
+      const ok = text.startsWith('{');
+      addLog((r.ok?'✅':'⚠️') + ' ' + ep + ' → ' + r.status + ' (' + len + 'B)' + (ok?'':' ⚠️ 非JSON响应'));
+    } catch(e) {
+      addLog('❌ ' + ep + ' → 请求失败: ' + e.message);
+    }
+  }
+  // DOM 检查
+  addLog('📋 DOM 检查: tabs=' + document.querySelectorAll('.tab').length + ', tab-content=' + document.querySelectorAll('.tab-content').length);
+  addLog('✅ 诊断完成');
+}
+
 async function loadSlots() {
   const data = await apiGet('/api/admin/slots');
   currentSlots = data.slots || [];
@@ -527,13 +699,22 @@ async function loadSlots() {
 
 function renderSlots() {
   document.getElementById('slotGrid').innerHTML = currentSlots.map(s =>
-    '<div class="slot-card ' + (s.enabled?'':'disabled') + '" onclick="editSlot(\''+s.id+'\')">' +
+    '<div class="slot-card ' + (s.enabled?'':'disabled') + '">' +
     '<div class="group-tag ' + s.group + '">' + (s.group==='effect'?'效果':'难度') + '</div>' +
-    '<div class="icon" style="background-image:url('+ (s.gift_icon||'') +')">' + (s.gift_icon?'':'🎁') + '</div>' +
+    '<div class="icon">' + (s.gift_icon ? '<img src="'+escapeHtml(s.gift_icon)+'" style="width:36px;height:36px;object-fit:contain;border-radius:6px" alt="">' : '🎁') + '</div>' +
     '<div class="name">' + escapeHtml(s.gift_name||'未绑定') + '</div>' +
     '<div class="desc">' + escapeHtml(s.name) + '<br>' + escapeHtml(s.desc) + '</div>' +
+    '<div style="display:flex;gap:4px;margin-top:6px;justify-content:center">' +
+    '<button class="btn btn-sm" onclick="editSlot(\''+s.id+'\')" style="font-size:10px;padding:2px 8px;background:rgba(0,212,255,0.1);border:1px solid rgba(0,212,255,0.2);color:#00d4ff;border-radius:4px;cursor:pointer">绑定</button>' +
+    '<button class="btn btn-sm" onclick="toggleSlot(\''+s.id+'\','+(!s.enabled)+')" style="font-size:10px;padding:2px 8px;background:'+(s.enabled?'rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.2);color:#ef4444':'rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.2);color:#22c55e')+';border-radius:4px;cursor:pointer">'+(s.enabled?'禁用':'启用')+'</button>' +
+    '</div>' +
     '</div>'
   ).join('');
+}
+
+async function toggleSlot(slotId, enabled) {
+  await apiPost('/api/admin/slots/toggle', {slot_id: slotId, enabled: enabled});
+  loadSlots();
 }
 
 function editSlot(slotId) {
@@ -553,7 +734,7 @@ async function searchGifts(query) {
   const body = document.getElementById('giftPickerBody');
   body.innerHTML = (data.gifts || []).map(g =>
     '<div class="gift-item" data-gift-name="' + escapeHtml(g.name) + '">' +
-    '<div class="icon" style="background-image:url('+ (g.icon||'') +')"></div>' +
+    '<div class="icon" style="font-size:24px;display:flex;align-items:center;justify-content:center;background:rgba(100,116,139,0.2);width:36px;height:36px;border-radius:6px;margin:0 auto 4px">' + (g.icon ? '<img src="'+escapeHtml(g.icon)+'" style="max-width:36px;max-height:36px;object-fit:contain;border-radius:4px" alt="">' : '🎁') + '</div>' +
     '<div class="name">' + escapeHtml(g.name) + '</div>' +
     '<div class="price">' + g.coins + '抖币</div>' +
     '</div>'
@@ -661,38 +842,19 @@ async function rejectAllAi() {
 async function apiGet(path) {
   try {
     const r = await fetch(path);
-    if (!r.ok) return {};
+    if (!r.ok) { addLog('⚠️ API ' + path + ' 返回 ' + r.status); return {}; }
     return await r.json();
-  } catch(e) { return {}; }
+  } catch(e) { addLog('❌ API 请求失败: ' + path + ' (' + e.message + ')'); return {}; }
 }
 async function apiPost(path, body) {
   try {
     const r = await fetch(path, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
-    if (!r.ok) return {};
+    if (!r.ok) { addLog('⚠️ API ' + path + ' 返回 ' + r.status); return {}; }
     return await r.json();
-  } catch(e) { return {}; }
+  } catch(e) { addLog('❌ API 请求失败: ' + path + ' (' + e.message + ')'); return {}; }
 }
 
 function escapeHtml(s) { if(!s) return ''; const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
-
-// Tabs
-document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
-  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
-  document.querySelectorAll('.tab-content').forEach(x=>x.classList.remove('active'));
-  t.classList.add('active');
-  document.getElementById('tab-'+t.dataset.tab).classList.add('active');
-  if (t.dataset.tab==='slots') loadSlots();
-  if (t.dataset.tab==='soup') loadSoupList();
-  if (t.dataset.tab==='theme') loadThemes();
-  // 数据 tab 启动轮询
-  if (t.dataset.tab==='data') {
-    refreshMetrics();
-    metricsTimer = setInterval(refreshMetrics, 5000);
-  } else if (metricsTimer) {
-    clearInterval(metricsTimer);
-    metricsTimer = null;
-  }
-}));
 
 // 鼠标悬停 tooltip（admin 数据 tab 图表）
 document.addEventListener('mousemove', function(e) {
@@ -722,6 +884,8 @@ setInterval(refreshMetrics, 60000);
 // 启动
 connect();
 refreshDiffGrid();
+loadLikeConfig();
+loadHintConfig();
 
 async function loadThemes() {
   const data = await apiGet('/api/admin/themes');
@@ -750,6 +914,97 @@ async function applyTheme(id) {
     addLog('❌ 主题切换失败: ' + (res.error || ''));
   }
 }
+
+// ── 安全设置：屏蔽词 CRUD ──
+async function loadBannedWords() {
+  const data = await apiGet('/api/admin/banned-words');
+  const words = data.words || [];
+  document.getElementById('bannedCount').textContent = words.length;
+  const list = document.getElementById('bannedWordList');
+  if (words.length === 0) {
+    list.innerHTML = '<div class="empty">暂无屏蔽词</div>';
+    return;
+  }
+  list.innerHTML = words.map(w =>
+    '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:rgba(0,0,0,0.2);border-radius:6px;margin-bottom:4px;font-size:13px">' +
+    '<span style="color:#e2e8f0">' + escapeHtml(w) + '</span>' +
+    '<button class="btn btn-danger btn-sm" onclick="deleteBannedWord(\'' + escapeHtml(w) + '\')">删除</button>' +
+    '</div>'
+  ).join('');
+}
+
+async function addBannedWord() {
+  const word = prompt('输入要屏蔽的关键词/短语：');
+  if (!word || !word.trim()) return;
+  const res = await apiPost('/api/admin/banned-words', {word: word.trim()});
+  if (res.ok) {
+    addLog('🔒 添加屏蔽词: ' + word.trim());
+    loadBannedWords();
+  } else {
+    alert('添加失败（可能已存在）');
+  }
+}
+
+async function deleteBannedWord(word) {
+  if (!confirm('确认删除屏蔽词「' + word + '」？')) return;
+  const res = await apiDelete('/api/admin/banned-words', {word: word});
+  if (res.ok) {
+    addLog('🔓 删除屏蔽词: ' + word);
+    loadBannedWords();
+  }
+}
+
+// 扩展 apiDelete 支持
+async function apiDelete(path, body) {
+  try {
+    const r = await fetch(path, {method:'DELETE', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+    if (!r.ok) return {};
+    return await r.json();
+  } catch(e) { return {}; }
+}
+
+// ── Tab 切换（使用 onclick 属性触发） ──
+function switchTab(el) {
+  try {
+    console.log('[Admin] 切换标签:', el.dataset.tab);
+    // 切换 tab 按钮激活状态
+    document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+    el.classList.add('active');
+    // 切换 tab-content
+    const tabId = el.dataset.tab;
+    if (!tabId) { console.error('[Admin] tab 缺少 data-tab'); return; }
+    document.querySelectorAll('.tab-content').forEach(x=>x.classList.remove('active'));
+    const contentEl = document.getElementById('tab-'+tabId);
+    if (contentEl) {
+      contentEl.classList.add('active');
+      // 下一帧验证 display 样式
+      requestAnimationFrame(function() {
+        const disp = getComputedStyle(contentEl).display;
+        if (disp === 'none') console.warn('[Admin]', tabId, 'display=none（样式冲突？）');
+        else console.log('[Admin]', tabId, 'display=' + disp);
+      });
+    } else {
+      console.warn('[Admin] 未找到 tab-content:', 'tab-'+tabId);
+      return;
+    }
+    // 加载对应数据
+    if (tabId==='slots') { loadSlots(); loadHintConfig(); }
+    if (tabId==='soup') loadSoupList();
+    if (tabId==='theme') loadThemes();
+    if (tabId==='security') loadBannedWords();
+    if (tabId==='data') {
+      refreshMetrics();
+      metricsTimer = setInterval(refreshMetrics, 5000);
+    } else if (metricsTimer) {
+      clearInterval(metricsTimer);
+      metricsTimer = null;
+    }
+  } catch(e) {
+    console.error('[Admin] switchTab 出错:', e);
+  }
+}
+// 自动 DOM 检查
+console.log('[Admin] DOM:', document.querySelectorAll('.tab').length + ' tabs, ' + document.querySelectorAll('.tab-content').length + ' contents');
 </script>
 </body>
 </html>"""

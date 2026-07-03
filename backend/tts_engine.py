@@ -142,12 +142,17 @@ def edge_available() -> bool:
         return False
 
 
-async def edge_generate_async(text: str, voice: str = None) -> tuple:
+async def edge_generate_async(text: str, voice: str = None, rate: float = None) -> tuple:
     """Return (sample_rate, mp3_bytes) — Edge TTS 输出 MP3."""
     import edge_tts
+    # rate: float → edge-tts 格式 "+XX%" / "-XX%"
+    rate_str = EDGE_RATE
+    if rate is not None and rate != 1.0:
+        pct = int(round((rate - 1.0) * 100))
+        rate_str = f"{pct:+d}%"
     communicate = edge_tts.Communicate(
         text, voice=voice or EDGE_VOICE,
-        rate=EDGE_RATE, volume=EDGE_VOLUME,
+        rate=rate_str, volume=EDGE_VOLUME,
     )
     audio = b""
     async for chunk in communicate.stream():
@@ -184,14 +189,14 @@ def edge_generate(text: str) -> tuple:
 
 # ==================== 统一入口 ====================
 
-async def async_generate_speech(text: str, engine: str = "cosyvoice", voice: str = None) -> tuple:
+async def async_generate_speech(text: str, engine: str = "cosyvoice", voice: str = None, rate: float = None) -> tuple:
     """
     异步统一入口。Server 端 await 此函数。
     Edge TTS 直接 await，CosyVoice3 用 run_in_executor 避免阻塞。
     """
     import asyncio
     if engine == "edge":
-        return await edge_generate_async(text, voice)
+        return await edge_generate_async(text, voice, rate)
     else:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, lambda: cosyvoice_generate(text))

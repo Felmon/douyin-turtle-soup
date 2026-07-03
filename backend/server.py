@@ -570,9 +570,11 @@ class PushDanmakuReq(BaseModel):
     user: str; content: str
 class TTSReq(BaseModel):
     text: str
+    rate: float | None = None
 class TTSConfigReq(BaseModel):
     engine: str | None = None
     voice: str | None = None
+    rate: float | None = None
 
 # ── API Endpoints ──
 @app.get("/health")
@@ -625,14 +627,22 @@ async def tts_synthesize(req: TTSReq):
     """Generate TTS audio from text using configured engine (cosyvoice/edge)."""
     engine = "cosyvoice"
     voice = None
+    rate = req.rate
     if db is not None:
         engine = db.get_setting("tts_engine", "cosyvoice")
         voice = db.get_setting("tts_voice", None)
-    sr, audio_bytes = await tts_engine.async_generate_speech(req.text, engine=engine, voice=voice)
+        if rate is None:
+            rate_default = db.get_setting("tts_rate", None)
+            if rate_default is not None:
+                rate = float(rate_default)
+    sr, audio_bytes = await tts_engine.async_generate_speech(req.text, engine=engine, voice=voice, rate=rate)
     if audio_bytes is None:
         return JSONResponse({"error": f"TTS engine '{engine}' not available"}, status_code=503)
     content_type = "audio/mpeg" if engine == "edge" else "audio/wav"
-    return Response(content=audio_bytes, media_type=content_type, headers={"X-Sample-Rate": str(sr), "X-TTS-Engine": engine})
+    headers = {"X-Sample-Rate": str(sr), "X-TTS-Engine": engine}
+    if rate is not None:
+        headers["X-TTS-Rate"] = str(rate)
+    return Response(content=audio_bytes, media_type=content_type, headers=headers)
 
 @app.get("/api/tts/status")
 async def tts_status():
@@ -645,19 +655,23 @@ async def tts_status():
 
 @app.get("/api/tts/config")
 async def tts_get_config():
-    """Get current TTS config (engine + voice)."""
+    """Get current TTS config (engine + voice + rate)."""
     engine = "cosyvoice"
     voice = None
+    rate = 1.0
     if db is not None:
         engine = db.get_setting("tts_engine", "cosyvoice")
         voice = db.get_setting("tts_voice", "zh-CN-XiaoxiaoNeural")
+        r = db.get_setting("tts_rate", None)
+        if r is not None:
+            rate = float(r)
     engines = tts_engine.list_engines()
     edge_voices = tts_engine.list_edge_voices()
-    return {"engine": engine, "voice": voice, "voices": edge_voices, "engines": engines}
+    return {"engine": engine, "voice": voice, "rate": rate, "voices": edge_voices, "engines": engines}
 
 @app.post("/api/tts/config")
 async def tts_set_config(req: TTSConfigReq):
-    """Set TTS config. Supports engine and/or voice."""
+    """Set TTS config. Supports engine, voice, and/or rate."""
     if req.engine is not None:
         if req.engine not in tts_engine.ENGINES:
             return JSONResponse({"error": f"Unknown engine: {req.engine}"}, status_code=400)
@@ -666,7 +680,10 @@ async def tts_set_config(req: TTSConfigReq):
     if req.voice is not None:
         if db is not None:
             db.set_setting("tts_voice", req.voice)
-    return {"ok": True, "engine": req.engine, "voice": req.voice}
+    if req.rate is not None:
+        if db is not None:
+            db.set_setting("tts_rate", str(req.rate))
+    return {"ok": True, "engine": req.engine, "voice": req.voice, "rate": req.rate}
 
 @app.get("/api/game/state")
 async def game_state():

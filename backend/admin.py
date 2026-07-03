@@ -224,6 +224,12 @@ canvas{max-width:100%}
             </select>
             <span id="ttsVoiceStatus" style="font-size:11px;color:#64748b"></span>
           </div>
+          <div style="display:flex;gap:10px;align-items:center;margin-top:8px">
+            <span style="font-size:11px;color:#94a3b8">语速:</span>
+            <input type="range" id="ttsRateSlider" min="0.5" max="2.0" step="0.1" value="1.0" oninput="setTtsRate(this.value)" style="width:120px;accent-color:#00d4ff">
+            <span id="ttsRateVal" style="font-size:12px;color:#e2e8f0;font-weight:600;min-width:32px">1.0</span>
+            <span id="ttsRateStatus" style="font-size:11px;color:#64748b"></span>
+          </div>
         </div>
       </div>
 
@@ -752,6 +758,11 @@ async function loadTtsConfig() {
     }
     sel.disabled = (d.engine !== 'edge');
     document.getElementById('ttsVoiceStatus').textContent = '';
+    // 设置语速滑块
+    if (d.rate !== undefined) {
+      document.getElementById('ttsRateSlider').value = d.rate;
+      document.getElementById('ttsRateVal').textContent = d.rate;
+    }
   } catch(e) { document.getElementById('ttsEngineStatus').textContent = '⚠ 加载失败'; }
 }
 
@@ -781,6 +792,20 @@ async function setTtsVoice(voice) {
     }
     setTimeout(() => document.getElementById('ttsVoiceStatus').textContent = '', 3000);
   } catch(e) { document.getElementById('ttsVoiceStatus').textContent = '❌ 请求失败'; }
+}
+
+async function setTtsRate(rate) {
+  try {
+    document.getElementById('ttsRateVal').textContent = rate;
+    const r = await apiPost('/api/tts/config', {rate: parseFloat(rate)});
+    if (r.ok) {
+      document.getElementById('ttsRateStatus').textContent = '✅ 已设置';
+      addLog('🔊 TTS语速已设为: ' + rate);
+    } else {
+      document.getElementById('ttsRateStatus').textContent = '❌ 设置失败';
+    }
+    setTimeout(() => document.getElementById('ttsRateStatus').textContent = '', 3000);
+  } catch(e) { document.getElementById('ttsRateStatus').textContent = '❌ 请求失败'; }
 }
 
 function updateGameState(state) {

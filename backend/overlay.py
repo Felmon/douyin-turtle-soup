@@ -145,7 +145,7 @@ body{color:var(--text);
 .reveal-stats{display:flex;gap:2.5vw;font-size:1.3vh;color:var(--text-dim)}
 .reveal-stats .val{color:var(--primary);font-weight:700;margin-left:0.4vw;font-size:1.5vh}
 
-.reveal-scroll{flex:1;overflow-y:auto;padding:1.5vh 2.5vw 1vh;
+.reveal-scroll{flex:1;overflow-y:hidden;padding:1.5vh 2.5vw 1vh;
   display:flex;flex-wrap:wrap;align-content:flex-start;gap:0.5vw;
   justify-content:center;align-items:flex-start;
   scrollbar-width:thin;scrollbar-color:rgba(0,212,255,0.3) transparent;
@@ -1106,6 +1106,9 @@ async function speakTTS(text, hideMs) {
         const blob = await resp.blob();
         const url = URL.createObjectURL(blob);
         ttsAudio = new Audio(url);
+        // 从响应头读取服务端语速设置并应用到 playbackRate
+        const serverRate = parseFloat(resp.headers.get('X-TTS-Rate')) || 1.0;
+        ttsAudio.playbackRate = serverRate;
         ttsAudio.onended = () => { URL.revokeObjectURL(url); ttsAudio = null; };
         ttsAudio.play().catch(() => {});
       }

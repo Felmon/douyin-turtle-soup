@@ -18,7 +18,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import JSONResponse, FileResponse, HTMLResponse, RedirectResponse, Response
 from pydantic import BaseModel
 from openai import OpenAI
 import uvicorn
@@ -29,6 +29,7 @@ from persistent import PersistentDB
 from tiers import TIERS, get_tier, check_tier_up, SCORE_BY_DIFFICULTY, DIFFICULTY_MULTIPLIER
 from gift_slots import slot_manager, GIFT_LIBRARY
 from spam_filter import spam_filter
+import tts_engine
 
 # ── 加载 .env ──
 _env_path = (Path(sys.executable).resolve().parent / ".env") if getattr(sys, "frozen", False) else (Path(__file__).resolve().parent.parent / ".env")
@@ -567,6 +568,11 @@ class ConfigReq(BaseModel):
     model: str = ""
 class PushDanmakuReq(BaseModel):
     user: str; content: str
+class TTSReq(BaseModel):
+    text: str
+class TTSConfigReq(BaseModel):
+    engine: str | None = None
+    voice: str | None = None
 
 # ── API Endpoints ──
 @app.get("/health")
@@ -613,6 +619,54 @@ async def update_config(req: ConfigReq):
 async def push_barrage(req: PushDanmakuReq):
     await manager.broadcast({"type": "danmu", "data": {"user": req.user, "content": req.content}})
     return {"ok": True}
+
+@app.post("/api/tts/synthesize")
+async def tts_synthesize(req: TTSReq):
+    """Generate TTS audio from text using configured engine (cosyvoice/edge)."""
+    engine = "cosyvoice"
+    voice = None
+    if db is not None:
+        engine = db.get_setting("tts_engine", "cosyvoice")
+        voice = db.get_setting("tts_voice", None)
+    sr, audio_bytes = await tts_engine.async_generate_speech(req.text, engine=engine, voice=voice)
+    if audio_bytes is None:
+        return JSONResponse({"error": f"TTS engine '{engine}' not available"}, status_code=503)
+    content_type = "audio/mpeg" if engine == "edge" else "audio/wav"
+    return Response(content=audio_bytes, media_type=content_type, headers={"X-Sample-Rate": str(sr), "X-TTS-Engine": engine})
+
+@app.get("/api/tts/status")
+async def tts_status():
+    """Check TTS engine availability."""
+    engines = tts_engine.list_engines()
+    engine = "cosyvoice"
+    if db is not None:
+        engine = db.get_setting("tts_engine", "cosyvoice")
+    return {"available": engines.get(engine, {}).get("available", False), "engines": engines, "active": engine}
+
+@app.get("/api/tts/config")
+async def tts_get_config():
+    """Get current TTS config (engine + voice)."""
+    engine = "cosyvoice"
+    voice = None
+    if db is not None:
+        engine = db.get_setting("tts_engine", "cosyvoice")
+        voice = db.get_setting("tts_voice", "zh-CN-XiaoxiaoNeural")
+    engines = tts_engine.list_engines()
+    edge_voices = tts_engine.list_edge_voices()
+    return {"engine": engine, "voice": voice, "voices": edge_voices, "engines": engines}
+
+@app.post("/api/tts/config")
+async def tts_set_config(req: TTSConfigReq):
+    """Set TTS config. Supports engine and/or voice."""
+    if req.engine is not None:
+        if req.engine not in tts_engine.ENGINES:
+            return JSONResponse({"error": f"Unknown engine: {req.engine}"}, status_code=400)
+        if db is not None:
+            db.set_setting("tts_engine", req.engine)
+    if req.voice is not None:
+        if db is not None:
+            db.set_setting("tts_voice", req.voice)
+    return {"ok": True, "engine": req.engine, "voice": req.voice}
 
 @app.get("/api/game/state")
 async def game_state():

@@ -205,6 +205,26 @@ canvas{max-width:100%}
             <span id="cfgGameDurationStatus" style="font-size:11px;color:#64748b"></span>
           </div>
         </div>
+        <!-- TTS 引擎选择 -->
+        <div class="section" style="margin-top:8px">
+          <h2>🔊 TTS 引擎</h2>
+          <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-top:8px">
+            <label style="font-size:12px;color:#cbd5e1;cursor:pointer;padding:4px 10px;background:#1e293b;border-radius:6px" id="ttsLabelCosyvoice">
+              <input type="radio" name="ttsEngine" value="cosyvoice" onchange="setTtsEngine('cosyvoice')" id="ttsRadioCosyvoice" style="accent-color:#00d4ff"> CosyVoice3 <span style="font-size:10px;color:#64748b">(本地)</span>
+            </label>
+            <label style="font-size:12px;color:#cbd5e1;cursor:pointer;padding:4px 10px;background:#1e293b;border-radius:6px" id="ttsLabelEdge">
+              <input type="radio" name="ttsEngine" value="edge" onchange="setTtsEngine('edge')" id="ttsRadioEdge" style="accent-color:#00d4ff"> Edge TTS <span style="font-size:10px;color:#64748b">(在线)</span>
+            </label>
+            <span id="ttsEngineStatus" style="font-size:11px;color:#64748b"></span>
+          </div>
+          <div style="display:flex;gap:10px;align-items:center;margin-top:8px">
+            <span style="font-size:11px;color:#94a3b8">音色:</span>
+            <select id="ttsVoiceSelect" onchange="setTtsVoice(this.value)" style="background:#1e293b;border:1px solid rgba(255,255,255,0.1);border-radius:6px;color:#e2e8f0;padding:4px 8px;font-size:12px;max-width:220px" disabled>
+              <option value="">加载中...</option>
+            </select>
+            <span id="ttsVoiceStatus" style="font-size:11px;color:#64748b"></span>
+          </div>
+        </div>
       </div>
 
       <div style="margin-top:12px" class="section">
@@ -712,6 +732,57 @@ async function saveGameConfig() {
   } catch(e) { addLog('❌ 保存请求失败'); }
 }
 
+async function loadTtsConfig() {
+  try {
+    const d = await apiGet('/api/tts/config');
+    // 设置引擎 radio
+    const el = document.getElementById('ttsRadio' + d.engine.charAt(0).toUpperCase() + d.engine.slice(1));
+    if (el) el.checked = true;
+    document.getElementById('ttsEngineStatus').textContent = '✅ 当前: ' + (d.engines[d.engine]?.label || d.engine);
+    // 填充音色下拉
+    const sel = document.getElementById('ttsVoiceSelect');
+    sel.innerHTML = '';
+    if (d.voices) {
+      for (const [id, label] of Object.entries(d.voices)) {
+        const opt = document.createElement('option');
+        opt.value = id; opt.textContent = label;
+        if (id === d.voice) opt.selected = true;
+        sel.appendChild(opt);
+      }
+    }
+    sel.disabled = (d.engine !== 'edge');
+    document.getElementById('ttsVoiceStatus').textContent = '';
+  } catch(e) { document.getElementById('ttsEngineStatus').textContent = '⚠ 加载失败'; }
+}
+
+async function setTtsEngine(engine) {
+  try {
+    const r = await apiPost('/api/tts/config', {engine: engine});
+    if (r.ok) {
+      document.getElementById('ttsEngineStatus').textContent = '✅ 已切换到 ' + engine;
+      addLog('🔊 TTS引擎已切换到: ' + engine);
+      // 切换引擎时联动音色下拉状态
+      document.getElementById('ttsVoiceSelect').disabled = (engine !== 'edge');
+    } else {
+      document.getElementById('ttsEngineStatus').textContent = '❌ 切换失败';
+    }
+    setTimeout(() => loadTtsConfig(), 3000);
+  } catch(e) { document.getElementById('ttsEngineStatus').textContent = '❌ 请求失败'; }
+}
+
+async function setTtsVoice(voice) {
+  try {
+    const r = await apiPost('/api/tts/config', {voice: voice});
+    if (r.ok) {
+      document.getElementById('ttsVoiceStatus').textContent = '✅ 已切换';
+      addLog('🔊 Edge TTS音色已切换: ' + voice);
+    } else {
+      document.getElementById('ttsVoiceStatus').textContent = '❌ 切换失败';
+    }
+    setTimeout(() => document.getElementById('ttsVoiceStatus').textContent = '', 3000);
+  } catch(e) { document.getElementById('ttsVoiceStatus').textContent = '❌ 请求失败'; }
+}
+
 function updateGameState(state) {
   if (state.surface) document.getElementById('curSurface').textContent = state.surface;
   if (state.charStates) updateCharStates(state.charStates);
@@ -1019,6 +1090,7 @@ refreshDiffGrid();
 loadAntiStallConfig();
 loadLlmConfig();
 loadGameConfig();
+loadTtsConfig();
 
 async function loadThemes() {
   const data = await apiGet('/api/admin/themes');
@@ -1121,7 +1193,7 @@ function switchTab(el) {
       return;
     }
     // 加载对应数据
-    if (tabId==='game') { loadGameConfig(); }
+    if (tabId==='game') { loadGameConfig(); loadTtsConfig(); }
     if (tabId==='slots') { loadSlots(); loadAntiStallConfig(); }
     if (tabId==='soup') loadSoupList();
     if (tabId==='theme') loadThemes();

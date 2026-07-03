@@ -1082,29 +1082,34 @@ function showSettlement(winner, bottom) {
 }
 
 // ══════════════════════════════════════════
-// TTS 字幕条 (与 Web Speech API 同步)
+// TTS 字幕条 (服务器 CosyVoice3 引擎)
 // ══════════════════════════════════════════
 let ttsTimeout = null;
-function speakTTS(text, hideMs) {
+let ttsAudio = null;
+async function speakTTS(text, hideMs) {
   if (!text) return;
-  // 取消上一个
   if (ttsTimeout) clearTimeout(ttsTimeout);
   // 显示字幕条
   const bar = document.getElementById('ttsBar');
   document.getElementById('ttsText').textContent = text;
   bar.style.display = 'flex';
   bar.classList.add('active');
-  // 同步 TTS 朗读
-  if (CONFIG.ttsEnabled && 'speechSynthesis' in window) {
+  // 从服务器获取 CosyVoice3 音频
+  if (CONFIG.ttsEnabled) {
     try {
-      window.speechSynthesis.cancel();
-      const u = new SpeechSynthesisUtterance(text);
-      u.lang = 'zh-CN';
-      u.rate = CONFIG.ttsRate;
-      u.pitch = 1.0;
-      u.volume = CONFIG.ttsVolume;
-      window.speechSynthesis.speak(u);
-    } catch(e) { /* 忽略 TTS 错误 */ }
+      if (ttsAudio) { ttsAudio.pause(); ttsAudio = null; }
+      const resp = await fetch('/api/tts/synthesize', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({text: text})
+      });
+      if (resp.ok) {
+        const blob = await resp.blob();
+        const url = URL.createObjectURL(blob);
+        ttsAudio = new Audio(url);
+        ttsAudio.onended = () => { URL.revokeObjectURL(url); ttsAudio = null; };
+        ttsAudio.play().catch(() => {});
+      }
+    } catch(e) { /* 服务器 TTS 不可用，静默降级 */ }
   }
   ttsTimeout = setTimeout(() => {
     bar.classList.remove('active');

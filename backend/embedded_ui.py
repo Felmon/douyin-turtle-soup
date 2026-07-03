@@ -169,6 +169,10 @@ header{display:flex;align-items:center;justify-content:space-between;padding:12p
 .toggle-switch .slider::before{content:'';position:absolute;height:16px;width:16px;left:2px;bottom:2px;background:#e2e8f0;border-radius:50%;transition:0.3s}
 .toggle-switch input:checked+.slider{background:#00d4ff}
 .toggle-switch input:checked+.slider::before{transform:translateX(16px)}
+.radio-label{display:inline-flex;align-items:center;gap:4px;font-size:12px;color:#cbd5e1;cursor:pointer;padding:4px 8px;background:#1e293b;border-radius:6px;transition:0.2s}
+.radio-label input[type="radio"]{accent-color:#00d4ff}
+.radio-label:has(input:checked){background:#00d4ff22;color:#00d4ff;border:1px solid #00d4ff44}
+.field-label{font-size:12px;color:#94a3b8}
 
 /* ── Win Overlay ── */
 .win-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.75);display:flex;align-items:center;justify-content:center;z-index:100;animation:fadeIn 0.4s ease;backdrop-filter:blur(4px)}
@@ -434,6 +438,15 @@ header{display:flex;align-items:center;justify-content:space-between;padding:12p
 <span class="val" id="cfgTtsVolumeVal">1.0</span>
 </div>
 </div>
+<div class="field">
+<div class="field-row">
+<span class="field-label">TTS引擎</span>
+</div>
+<div class="field-row" style="gap:12px;margin-top:4px">
+<label class="radio-label"><input type="radio" name="ttsEngine" value="cosyvoice" onchange="saveTtsEngine(this.value)" id="engCosyvoice"> CosyVoice3 (本地)</label>
+<label class="radio-label"><input type="radio" name="ttsEngine" value="edge" onchange="saveTtsEngine(this.value)" id="engEdge"> Edge TTS (在线)</label>
+</div>
+</div>
 </div>
 
 <div class="actions">
@@ -538,6 +551,16 @@ function loadSettings(){
     document.getElementById('cfgTtsRateVal').textContent = s.ttsRate || 1.0;
     document.getElementById('cfgTtsVolume').value = s.ttsVolume || 1.0;
     document.getElementById('cfgTtsVolumeVal').textContent = s.ttsVolume || 1.0;
+    loadTtsEngine();
+}
+function loadTtsEngine(){
+    fetch('/api/tts/config').then(function(r){return r.json()}).then(function(d){
+        var el = document.getElementById('eng'+d.engine.charAt(0).toUpperCase()+d.engine.slice(1));
+        if(el) el.checked = true;
+    }).catch(function(){});
+}
+function saveTtsEngine(val){
+    fetch('/api/tts/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({engine:val})}).catch(function(){});
 }
 function saveApiSettings(){
     var s = JSON.parse(localStorage.getItem('cccat_settings') || '{}');
@@ -672,15 +695,11 @@ function handle(msg){
         case 'hint':
             if(msg.hint){
                 addQA('💡 提示',msg.hint,'是');
-                if(msg.script){
-                    try{var _s=JSON.parse(localStorage.getItem('cccat_settings')||'{}');if(_s.ttsEnabled!==false){window.speechSynthesis.cancel();var u=new SpeechSynthesisUtterance(msg.script);u.lang='zh-CN';u.rate=_s.ttsRate||1.0;u.volume=_s.ttsVolume||1.0;speechSynthesis.speak(u)}}catch(e){}
-                }
+                if(msg.script){ttsPlay(msg.script)}
             }
             break;
         case 'gift_effect':
-            if(msg.script){
-                try{var _s=JSON.parse(localStorage.getItem('cccat_settings')||'{}');if(_s.ttsEnabled!==false){window.speechSynthesis.cancel();var u=new SpeechSynthesisUtterance(msg.script);u.lang='zh-CN';u.rate=_s.ttsRate||1.0;u.volume=_s.ttsVolume||1.0;speechSynthesis.speak(u)}}catch(e){}
-            }
+            if(msg.script){ttsPlay(msg.script)}
             showGiftToast(msg);
             // 全屏动画 + 连击 + 余额
             const gtype=msg.giftType||msg.giftName||'';
@@ -728,6 +747,16 @@ function renderReveal(){
     }).join('');
 }
 let docReady=true;
+let _ttsAudio=null;
+async function ttsPlay(text){
+  var _s=JSON.parse(localStorage.getItem('cccat_settings')||'{}');
+  if(_s.ttsEnabled===false)return;
+  try{
+    if(_ttsAudio){_ttsAudio.pause();_ttsAudio=null}
+    var r=await fetch('/api/tts/synthesize',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:text})});
+    if(r.ok){var b=await r.blob(),u=URL.createObjectURL(b);_ttsAudio=new Audio(u);_ttsAudio.onended=function(){URL.revokeObjectURL(u);_ttsAudio=null};_ttsAudio.play()}
+  }catch(e){}
+}
 function addQA(user,text,answerType){
     const list=document.getElementById('qaList'), empty=list.querySelector('.empty-state');
     if(empty)list.innerHTML='';

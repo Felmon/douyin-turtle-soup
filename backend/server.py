@@ -12,11 +12,12 @@ import math
 import random as rnd
 import subprocess
 import webbrowser
+import secrets
 from pathlib import Path
 from dotenv import load_dotenv
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse, HTMLResponse, RedirectResponse, Response
 from pydantic import BaseModel
@@ -48,6 +49,14 @@ else:
 LLM_API_KEY = os.getenv("LLM_API_KEY", "")
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://api.deepseek.com")
 LLM_MODEL = os.getenv("LLM_MODEL", "deepseek-v4-flash")
+
+# Admin 面板认证
+ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
+if not ADMIN_TOKEN:
+    ADMIN_TOKEN = secrets.token_hex(16)
+    print(f"[Auth] ⚠️ 未设置 ADMIN_TOKEN（请在 .env 中配置），本次自动生成: {ADMIN_TOKEN}")
+else:
+    print(f"[Auth] Admin 认证已启用")
 
 SERVER_PORT = int(os.getenv("SERVER_PORT", "3010"))
 FRONTEND_PORT = int(os.getenv("FRONTEND_PORT", "3015"))
@@ -555,6 +564,17 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="CCcat 海龟汤", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
+# ── Admin 认证中间件 ──
+@app.middleware("http")
+async def admin_auth_middleware(request: Request, call_next):
+    if request.url.path.startswith("/api/admin/"):
+        token = request.headers.get("Authorization", "").replace("Bearer ", "")
+        if not token:
+            token = request.query_params.get("token", "")
+        if token != ADMIN_TOKEN:
+            return JSONResponse(status_code=401, content={"error": "unauthorized", "message": "需要有效的管理密码，请在 URL 添加 ?token=xxx"})
+    return await call_next(request)
+
 # ── Request Models ──
 class ClassifyReq(BaseModel):
     text: str; answer: str; keywords: list[str]
@@ -575,6 +595,7 @@ class TTSConfigReq(BaseModel):
     engine: str | None = None
     voice: str | None = None
     rate: float | None = None
+    cosyvoice_spk: str | None = None
 
 # ── API Endpoints ──
 @app.get("/health")
@@ -625,17 +646,19 @@ async def push_barrage(req: PushDanmakuReq):
 @app.post("/api/tts/synthesize")
 async def tts_synthesize(req: TTSReq):
     """Generate TTS audio from text using configured engine (cosyvoice/edge)."""
-    engine = "cosyvoice"
+    engine = "edge"
     voice = None
     rate = req.rate
+    spk_id = None
     if db is not None:
-        engine = db.get_setting("tts_engine", "cosyvoice")
+        engine = db.get_setting("tts_engine", "edge")
         voice = db.get_setting("tts_voice", None)
+        spk_id = db.get_setting("cosyvoice_spk", None)
         if rate is None:
             rate_default = db.get_setting("tts_rate", None)
             if rate_default is not None:
                 rate = float(rate_default)
-    sr, audio_bytes = await tts_engine.async_generate_speech(req.text, engine=engine, voice=voice, rate=rate)
+    sr, audio_bytes = await tts_engine.async_generate_speech(req.text, engine=engine, voice=voice, rate=rate, spk_id=spk_id)
     if audio_bytes is None:
         return JSONResponse({"error": f"TTS engine '{engine}' not available"}, status_code=503)
     content_type = "audio/mpeg" if engine == "edge" else "audio/wav"
@@ -648,26 +671,37 @@ async def tts_synthesize(req: TTSReq):
 async def tts_status():
     """Check TTS engine availability."""
     engines = tts_engine.list_engines()
-    engine = "cosyvoice"
+    engine = "edge"
     if db is not None:
-        engine = db.get_setting("tts_engine", "cosyvoice")
+        engine = db.get_setting("tts_engine", "edge")
     return {"available": engines.get(engine, {}).get("available", False), "engines": engines, "active": engine}
 
 @app.get("/api/tts/config")
 async def tts_get_config():
     """Get current TTS config (engine + voice + rate)."""
-    engine = "cosyvoice"
+    engine = "edge"
     voice = None
     rate = 1.0
     if db is not None:
-        engine = db.get_setting("tts_engine", "cosyvoice")
+        engine = db.get_setting("tts_engine", "edge")
         voice = db.get_setting("tts_voice", "zh-CN-XiaoxiaoNeural")
         r = db.get_setting("tts_rate", None)
         if r is not None:
             rate = float(r)
     engines = tts_engine.list_engines()
     edge_voices = tts_engine.list_edge_voices()
-    return {"engine": engine, "voice": voice, "rate": rate, "voices": edge_voices, "engines": engines}
+    # CosyVoice3 当前音色
+    current_spk = tts_engine.DEFAULT_SPK_ID
+    if db is not None:
+        s = db.get_setting("cosyvoice_spk", None)
+        if s:
+            current_spk = s
+    return {
+        "engine": engine, "voice": voice, "rate": rate,
+        "voices": edge_voices, "engines": engines,
+        "cosyvoice_spk": current_spk,
+        "cosyvoice_speakers": tts_engine.list_cosyvoice_speakers(),
+    }
 
 @app.post("/api/tts/config")
 async def tts_set_config(req: TTSConfigReq):
@@ -683,7 +717,227 @@ async def tts_set_config(req: TTSConfigReq):
     if req.rate is not None:
         if db is not None:
             db.set_setting("tts_rate", str(req.rate))
+    if req.cosyvoice_spk is not None:
+        if db is not None:
+            db.set_setting("cosyvoice_spk", req.cosyvoice_spk)
     return {"ok": True, "engine": req.engine, "voice": req.voice, "rate": req.rate}
+
+
+# ── CosyVoice3 一键部署 ──
+_cosyvoice_deploy_lock = asyncio.Lock()
+_cosyvoice_deploy_progress = {"step": "", "pct": 0, "text": ""}
+_cosyvoice_gpu_cache = None
+_cosyvoice_gpu_cache_time = 0
+
+async def _check_gpu_info_async(force: bool = False):
+    """用 run_in_executor 检测 GPU（不阻塞事件循环）。缓存 30 秒避免高频轮询。"""
+    global _cosyvoice_gpu_cache, _cosyvoice_gpu_cache_time
+    now = time.time()
+    if not force and _cosyvoice_gpu_cache and (now - _cosyvoice_gpu_cache_time) < 30:
+        return _cosyvoice_gpu_cache
+    def _detect():
+        info = {"cuda": False, "directml": False, "name": "", "vram": ""}
+        try:
+            result = subprocess.run(["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"],
+                                    capture_output=True, text=True, timeout=10)
+            if result.returncode == 0 and result.stdout.strip():
+                parts = result.stdout.strip().split("\n")[0].split(", ")
+                info["cuda"] = True
+                info["name"] = parts[0] if len(parts) > 0 else ""
+                info["vram"] = parts[1] + " MB" if len(parts) > 1 else ""
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
+        if not info["cuda"]:
+            try:
+                import onnxruntime
+                if "Dml" in onnxruntime.get_available_providers():
+                    info["directml"] = True
+                    info["name"] = "DirectML (Windows GPU)"
+            except Exception:
+                pass
+        return info
+    loop = asyncio.get_running_loop()
+    _cosyvoice_gpu_cache = await loop.run_in_executor(None, _detect)
+    _cosyvoice_gpu_cache_time = now
+    return _cosyvoice_gpu_cache
+
+@app.get("/api/tts/cosyvoice-deploy")
+async def tts_cosyvoice_deploy_status():
+    """返回 CosyVoice3 部署状态 + 系统信息。"""
+    status = tts_engine.cosyvoice_status()
+    gpu_info = await _check_gpu_info_async()
+    return {
+        "status": status["status"],
+        "detail": status["detail"],
+        "gpu": gpu_info,
+        "deploying": _cosyvoice_deploy_lock.locked(),
+        "progress": _cosyvoice_deploy_progress,
+    }
+
+def _pip_install_cosyvoice_deps(gpu_info: dict = None):
+    """安装 CosyVoice3 所需的 Python 依赖（分批安装，只装缺失的）。"""
+    # 检查已安装的包
+    installed = set()
+    try:
+        r = subprocess.run([sys.executable, "-m", "pip", "list", "--format=freeze"],
+                           capture_output=True, text=True, timeout=30)
+        for line in r.stdout.strip().splitlines():
+            pkg_name = line.split("==")[0].strip().lower()
+            if pkg_name:
+                installed.add(pkg_name)
+    except Exception:
+        pass  # 检测失败则全部安装
+
+    candidates = [
+        "torch>=2.0.0", "torchaudio>=2.0.0",
+        "soundfile", "librosa",
+        "hydra-core", "omegaconf", "einops",
+        "vector-quantize-pytorch", "tensorboard", "lightning",
+        "conformer", "diffusers", "modelscope",
+        "transformers", "onnx", "protobuf", "pyarrow", "wetext", "pyworld",
+        "huggingface_hub",
+    ]
+    if gpu_info and gpu_info.get("cuda"):
+        candidates.append("onnxruntime-gpu==1.18.0")
+    elif gpu_info and gpu_info.get("directml"):
+        candidates.append("onnxruntime-directml")
+    else:
+        candidates.append("onnxruntime")
+
+    # 过滤已安装的包（不传 --upgrade，避免重装 torch）
+    to_install = []
+    for pkg in candidates:
+        base = pkg.split(">=")[0].split("==")[0].strip().lower()
+        if base not in installed:
+            to_install.append(pkg)
+
+    if not to_install:
+        print("[TTS Deploy] 所有 Python 依赖已安装，跳过")
+        return
+
+    print(f"[TTS Deploy] 安装 {len(to_install)} 个缺失依赖: {to_install}")
+    # 分批安装，每批更新进度
+    batch_size = 5
+    total_batches = (len(to_install) + batch_size - 1) // batch_size
+    for i in range(0, len(to_install), batch_size):
+        batch = to_install[i:i + batch_size]
+        batch_idx = i // batch_size
+        pct = 10 + int(30 * (batch_idx / total_batches))  # 10%~40%
+        global _cosyvoice_deploy_progress
+        _cosyvoice_deploy_progress = {
+            "step": "install_deps", "pct": pct,
+            "text": f"安装依赖 ({batch_idx+1}/{total_batches}): {batch[0].split('>')[0].split('=')[0]}..."
+        }
+        subprocess.check_call(
+            [sys.executable, "-m", "pip", "install"] + batch,
+            timeout=1200,
+        )
+
+def _git_submodule_update():
+    """初始化 git 子模块（Matcha-TTS）。"""
+    repo_root = Path(__file__).resolve().parent.parent  # 项目根目录
+    subprocess.check_call(["git", "submodule", "update", "--init", "--recursive"],
+                          cwd=str(repo_root), timeout=120)
+
+def _download_cosyvoice_model():
+    """下载模型（如已存在则跳过）。"""
+    import huggingface_hub
+    model_dir = Path(tts_engine.__file__).resolve().parent / "CosyVoice" / "pretrained_models" / "Fun-CosyVoice3-0.5B"
+    if (model_dir / "flow.pt").exists():
+        return  # 已存在，跳过
+    model_dir.mkdir(parents=True, exist_ok=True)
+    huggingface_hub.snapshot_download(
+        "FunAudioLLM/CosyVoice3-0.5B",
+        local_dir=str(model_dir),
+        local_dir_use_symlinks=False,
+        resume_download=True,
+    )
+
+@app.post("/api/tts/cosyvoice-deploy")
+async def tts_cosyvoice_deploy_start():
+    """启动异步 CosyVoice3 部署。"""
+    if getattr(sys, "frozen", False):
+        return {"ok": False, "error": "打包环境下无法自动部署，请下载 CosyVoice3 后手动放置"}
+    if _cosyvoice_deploy_lock.locked():
+        return {"ok": False, "error": "已有部署任务在进行中"}
+    global _cosyvoice_deploy_progress
+    _cosyvoice_deploy_progress = {"step": "starting", "pct": 0, "text": "准备部署..."}
+    asyncio.create_task(_run_cosyvoice_deploy())
+    return {"ok": True, "message": "部署已启动"}
+
+async def _run_cosyvoice_deploy():
+    """异步部署协程（后台运行）。"""
+    global _cosyvoice_deploy_progress
+    loop = asyncio.get_running_loop()
+    try:
+        async with _cosyvoice_deploy_lock:
+            # 步骤1: 安装依赖
+            gpu_info = await _check_gpu_info_async(force=True)
+            _cosyvoice_deploy_progress = {"step": "install_deps", "pct": 10, "text": "安装 Python 依赖..."}
+            await loop.run_in_executor(None, lambda: _pip_install_cosyvoice_deps(gpu_info))
+            _cosyvoice_deploy_progress = {"step": "install_deps", "pct": 40, "text": "依赖安装完成"}
+
+            # 步骤2: git submodule
+            _cosyvoice_deploy_progress = {"step": "submodule", "pct": 45, "text": "初始化子模块..."}
+            await loop.run_in_executor(None, _git_submodule_update)
+            _cosyvoice_deploy_progress = {"step": "submodule", "pct": 50, "text": "子模块已就绪"}
+
+            # 步骤3: 下载模型
+            _cosyvoice_deploy_progress = {"step": "download_model", "pct": 55, "text": "下载模型文件中..."}
+            await loop.run_in_executor(None, _download_cosyvoice_model)
+            _cosyvoice_deploy_progress = {"step": "download_model", "pct": 90, "text": "模型下载完成"}
+
+            # 步骤4: 验证（在 executor 中加载模型，避免阻塞事件循环）
+            _cosyvoice_deploy_progress = {"step": "verify", "pct": 95, "text": "正在验证..."}
+            tts_engine.reset_cosyvoice()
+            status = await loop.run_in_executor(None, tts_engine.cosyvoice_status)
+            if status["status"] == "ready":
+                _cosyvoice_deploy_progress = {"step": "done", "pct": 100, "text": "✅ 部署成功！CosyVoice3 已就绪"}
+            else:
+                _cosyvoice_deploy_progress = {"step": "error", "pct": 0, "text": f"❌ 验证失败: {status['detail']}"}
+    except Exception as e:
+        _cosyvoice_deploy_progress = {"step": "error", "pct": 0, "text": f"❌ 部署失败: {str(e)[:80]}"}
+        print(f"[CosyVoice Deploy] Error: {e}")
+        import traceback
+        traceback.print_exc()
+
+
+import uuid
+
+
+@app.post("/api/tts/cosyvoice-speaker")
+async def tts_cosyvoice_add_speaker(file: UploadFile = File(...)):
+    """上传 WAV 文件注册 CosyVoice3 新音色。"""
+    if file.content_type not in ("audio/wav", "audio/x-wav"):
+        return JSONResponse({"ok": False, "error": "仅支持 WAV 文件"}, status_code=400)
+    asset_dir = tts_engine.COSYVOICE_DIR / "asset"
+    asset_dir.mkdir(parents=True, exist_ok=True)
+    spk_id = f"upload_{uuid.uuid4().hex[:8]}"
+    fname = f"zero_shot_prompt_{spk_id}.wav"
+    dest = asset_dir / fname
+    content = await file.read()
+    dest.write_bytes(content)
+    ok = tts_engine.register_cosyvoice_speaker(spk_id, str(dest))
+    if ok:
+        return {"ok": True, "spk_id": spk_id, "name": fname}
+    dest.unlink(missing_ok=True)
+    return JSONResponse({"ok": False, "error": "说话人注册失败"}, status_code=500)
+
+
+@app.post("/api/tts/cosyvoice-uninstall")
+async def tts_cosyvoice_uninstall():
+    """卸载 CosyVoice3 模型文件，重置引擎到 Edge。"""
+    if _cosyvoice_deploy_lock.locked():
+        return {"ok": False, "error": "部署进行中，请等待完成后再卸载"}
+    model_dir = tts_engine.COSYVOICE_DIR / "pretrained_models" / "Fun-CosyVoice3-0.5B"
+    if model_dir.exists():
+        import shutil
+        shutil.rmtree(model_dir)
+    if db is not None:
+        db.set_setting("tts_engine", "edge")
+    tts_engine.reset_cosyvoice()
+    return {"ok": True, "message": "已卸载"}
+
 
 @app.get("/api/game/state")
 async def game_state():
@@ -1169,9 +1423,41 @@ async def handle_gift(msg: dict):
 
 
 # ── Admin 路由 ──
+LOGIN_HTML = """<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>海龟汤管理面板 · 登录</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh;background:linear-gradient(135deg,#0f0c29,#302b63,#24243e);color:#fff}
+.login-box{background:rgba(255,255,255,0.05);backdrop-filter:blur(10px);padding:2.5rem;border-radius:16px;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,0.4);border:1px solid rgba(255,255,255,0.1);width:360px}
+.login-box h2{margin-bottom:0.5rem;font-size:1.5rem}
+.login-box p{color:#aaa;margin-bottom:1.5rem;font-size:0.9rem}
+input{width:100%;padding:12px 16px;border-radius:8px;border:1px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.1);color:#fff;font-size:16px;outline:none;transition:border-color 0.2s}
+input:focus{border-color:#e94560}
+button{width:100%;padding:12px 24px;border-radius:8px;border:none;background:#e94560;color:#fff;font-size:16px;cursor:pointer;margin-top:1rem;transition:background 0.2s}
+button:hover{background:#ff6b81}
+.error{color:#e94560;margin-top:0.75rem;font-size:0.85rem;display:none}
+</style></head><body>
+<div class="login-box">
+<h2>🔐 管理面板</h2>
+<p>请输入管理密码</p>
+<form method="get" action="/admin">
+<input type="password" name="token" placeholder="管理密码" autofocus>
+<button type="submit">登录</button>
+</form>
+<div id="error" class="error"></div>
+</div></body></html>"""
+
 @app.get("/admin")
-async def admin_page():
-    return HTMLResponse(content=ADMIN_HTML, headers={"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache", "Expires": "0"})
+async def admin_page(request: Request):
+    token = request.query_params.get("token", "")
+    if not token:
+        return HTMLResponse(content=LOGIN_HTML)
+    if token != ADMIN_TOKEN:
+        err_html = LOGIN_HTML.replace('<div id="error" class="error"></div>', '<div id="error" class="error" style="display:block">密码错误，请重试</div>')
+        return HTMLResponse(content=err_html)
+    # 注入 token 到 admin 页面 JS，使 fetch 自动携带 Authorization header
+    token_script = f"""<script>window.ADMIN_TOKEN={json.dumps(token)};(function(){{var f=window.fetch;window.fetch=function(u,o){{if(typeof u==='string'&&u.indexOf('/api/admin/')>=0){{o=o||{{}};o.headers=o.headers||{{}};o.headers['Authorization']='Bearer '+window.ADMIN_TOKEN}}return f.call(window,u,o)}}}})()</script>"""
+    html = ADMIN_HTML.replace("</head>", token_script + "</head>")
+    return HTMLResponse(content=html, headers={"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache", "Expires": "0"})
 
 @app.get("/overlay")
 async def overlay_page():
@@ -1497,7 +1783,7 @@ if __name__ == "__main__":
     print("=" * 50)
     print(f"  CCcat 海龟汤 - V7 (三端分离)")
     print(f"  LLM: {LLM_MODEL} @ {LLM_BASE_URL}")
-    print(f"  [Admin] http://localhost:{SERVER_PORT}/admin")
+    print(f"  [Admin] http://localhost:{SERVER_PORT}/admin ?token={ADMIN_TOKEN}")
     print(f"  [Overlay] http://localhost:{SERVER_PORT}/overlay")
     print(f"  [WS]  ws://localhost:{SERVER_PORT}/ws")
     print("=" * 50)

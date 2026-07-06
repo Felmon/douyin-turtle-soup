@@ -122,25 +122,3 @@ export function calculateRevealProgress(
     percentage: total === 0 ? 0 : Math.round((revealed / total) * 100),
   };
 }
-
-/** 过滤无效弹幕 */
-export function filterInvalidBarrage(content: string): boolean {
-  if (!content || content.trim().length === 0) return false;
-  
-  const trimmed = content.trim();
-  
-  // 纯标点
-  if (/^[\W\s]+$/.test(trimmed)) return false;
-  
-  // 纯数字
-  if (/^\d+$/.test(trimmed)) return false;
-  
-  // 长度过短或过长
-  if (trimmed.length < 2 || trimmed.length > 30) return false;
-  
-  // 常见无意义弹幕
-  const meaningless = ['哈哈哈', '666', '主播好', '你好', '测试', '啊啊啊'];
-  if (meaningless.some((m) => trimmed.includes(m))) return false;
-  
-  return true;
-}

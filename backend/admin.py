@@ -157,7 +157,7 @@ canvas{max-width:100%}
       </div>
     </div>
     <div class="header-actions">
-      <button class="btn btn-cyan" onclick="window.open('/overlay','_blank')">📺 投屏</button>
+      <button class="btn btn-ghost" onclick="openOverlay()">📺 投屏</button>
       <button class="btn btn-ghost" onclick="reloadConfig()">🔄 重载</button>
       <button class="btn btn-ghost" onclick="runDiagnostic()" title="检查API连通性">🔍 诊断</button>
     </div>
@@ -255,6 +255,7 @@ canvas{max-width:100%}
         <div class="section">
           <h2>操作日志 <button class="btn btn-ghost btn-sm" onclick="clearLog()" style="float:right">清空</button></h2>
           <div id="logList" style="max-height:200px;overflow-y:auto;background:rgba(0,0,0,0.3);border-radius:6px;padding:8px;font-size:11px;font-family:monospace;color:#94a3b8"></div>
+          <div id="connStatus" style="font-size:10px;color:#64748b;margin-top:4px;padding:2px 4px"></div>
         </div>
       </div>
     </div>
@@ -524,7 +525,7 @@ function handleMessage(msg) {
         if (el) el.textContent = msg.room.room_id;
       }
       break;
-    case 'game_start': updateGameState({surface: msg.surface, charStates: msg.charStates, difficulty: msg.difficulty, phase: msg.phase || 'reading'}); break;
+    case 'game_start': updateGameState({surface: msg.surface, charStates: msg.charStates, difficulty: msg.difficulty, phase: msg.phase || 'reading'}); openOverlay(); break;
     case 'reveal_update': updateCharStates(msg.charStates); break;
     case 'timer': updateTimer(msg.remaining); break;
     case 'game_end': document.getElementById('statusInfo').textContent='● 已结束'; break;
@@ -1040,7 +1041,7 @@ async function deployCosyvoice() {
             btn.textContent = '📥 一键安装';
             setTimeout(() => { progressEl.style.display = 'none'; }, 5000);
           } else {
-            statusText.textContent = labels[step] || step || text;
+            statusText.textContent = text || labels[step] || step;
             if (step === 'done') {
               clearInterval(poll);
               setTimeout(() => {
@@ -1073,7 +1074,7 @@ async function deployCosyvoice() {
 }
 
 async function uninstallCosyvoice() {
-  if (!confirm('确认卸载 CosyVoice3？模型文件将被删除，引擎将切回 Edge TTS。')) return;
+  if (!confirm('确认卸载 CosyVoice3？将删除整个 CosyVoiceV7 目录（代码 + 模型），引擎切回 Edge TTS。pip 依赖保留以便重装。')) return;
   const btn = document.getElementById('cvUninstallBtn');
   if (btn) { btn.disabled = true; btn.textContent = '⏳ 卸载中...'; }
   try {
@@ -1285,6 +1286,7 @@ function setDiff(d) {
 
 function startGame() {
   apiPost('/api/game/start', {difficulty: selectedDiff});
+  openOverlay();
 }
 function endGame() {
   if (!confirm('确认揭晓完整答案？')) return;
@@ -1293,6 +1295,20 @@ function endGame() {
 function resetGame() {
   if (!confirm('确认重置游戏？当前进度将清空。')) return;
   apiPost('/api/admin/reset', {});
+}
+
+function openOverlay() {
+  // PyWebView 注入了 window.pywebview.api.open_overlay（注意是 snake_case）
+  if (window.pywebview && window.pywebview.api && window.pywebview.api.open_overlay) {
+    window.pywebview.api.open_overlay().catch(function(e) {
+      console.error('open_overlay error:', e);
+      addLog('投屏窗口打开失败');
+    });
+  } else if (!window.pywebview) {
+    addLog('⚠️ 投屏功能仅支持 EXE 模式，请在控制台中使用');
+  } else {
+    console.warn('pywebview available but api.open_overlay not found, api keys:', Object.keys(window.pywebview.api));
+  }
 }
 
 function addLog(msg) {
@@ -1416,7 +1432,7 @@ async function loadSoupList() {
   ).join('') || '<div class="empty">暂无题目</div>';
 }
 
-async function useSoup(id) { await apiPost('/api/game/start', {soup_id: id}); }
+async function useSoup(id) { apiPost('/api/game/start', {soup_id: id}); openOverlay(); }
 async function deleteSoup(id) { if (confirm('确认删除？')) { await apiPost('/api/admin/soups/delete', {id: id}); loadSoupList(); } }
 
 function showAddSoup() { document.getElementById('addSoupModal').style.display = 'flex'; }
@@ -1493,19 +1509,87 @@ async function rejectAllAi() {
   addLog('批量废弃 ' + c + ' 道题');
 }
 
-async function apiGet(path) {
-  try {
-    const r = await fetch(path);
-    if (!r.ok) { addLog('⚠️ API ' + path + ' 返回 ' + r.status); return {}; }
-    return await r.json();
-  } catch(e) { addLog('❌ API 请求失败: ' + path + ' (' + e.message + ')'); return {}; }
+let connected = false;
+let connErrors = 0;
+let connFinalMsgShown = false;
+const startupEndpoints = ['/api/admin/game-config', '/api/admin/anti-stall-config', '/api/admin/slots', '/api/tts/config', '/api/config', '/api/game/start'];
+function setConnStatus(ok, msg) {
+  const el = document.getElementById('connStatus');
+  if (!el) return;
+  if (ok) {
+    el.innerHTML = '✅ 后端已连接';
+    el.style.color = '#22c55e';
+    connected = true;
+  } else if (!connected) {
+    el.innerHTML = '⏳ ' + escapeHtml(msg);
+    el.style.color = '#fbbf24';
+  }
 }
-async function apiPost(path, body) {
-  try {
-    const r = await fetch(path, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
-    if (!r.ok) { addLog('⚠️ API ' + path + ' 返回 ' + r.status); return {}; }
-    return await r.json();
-  } catch(e) { addLog('❌ API 请求失败: ' + path + ' (' + e.message + ')'); return {}; }
+
+function isStartupEndpoint(path) {
+  return startupEndpoints.some(e => path.startsWith(e));
+}
+
+async function apiGet(path, retries = 5) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      const r = await fetch(path);
+      if (!r.ok) { addLog('⚠️ API ' + path + ' 返回 ' + r.status); return {}; }
+      if (!connected) setConnStatus(true, '');
+      return await r.json();
+    } catch(e) {
+      if (i < retries - 1) {
+        if (!connected && isStartupEndpoint(path)) setConnStatus(false, '连接后端 ' + path + ' (' + (i+1) + '/' + retries + ')');
+        await new Promise(r => setTimeout(r, 1000));
+      } else {
+        if (!connected) {
+          if (isStartupEndpoint(path)) {
+            connErrors++;
+            if (!connFinalMsgShown && connErrors >= startupEndpoints.length) {
+              connFinalMsgShown = true;
+              setConnStatus(false, '后端无响应 — 请确认后端服务器已启动');
+              const s = document.getElementById('connStatus');
+              if (s) s.style.color = '#ef4444';
+            }
+          }
+        } else {
+          addLog('❌ API 请求失败: ' + path + ' (' + e.message + ')');
+        }
+      }
+    }
+  }
+  return {};
+}
+
+async function apiPost(path, body, retries = 5) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      const r = await fetch(path, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+      if (!r.ok) { addLog('⚠️ API ' + path + ' 返回 ' + r.status); return {}; }
+      if (!connected) setConnStatus(true, '');
+      return await r.json();
+    } catch(e) {
+      if (i < retries - 1) {
+        if (!connected && isStartupEndpoint(path)) setConnStatus(false, '连接后端 ' + path + ' (' + (i+1) + '/' + retries + ')');
+        await new Promise(r => setTimeout(r, 1000));
+      } else {
+        if (!connected) {
+          if (isStartupEndpoint(path)) {
+            connErrors++;
+            if (!connFinalMsgShown && connErrors >= startupEndpoints.length) {
+              connFinalMsgShown = true;
+              setConnStatus(false, '后端无响应 — 请确认后端服务器已启动');
+              const s = document.getElementById('connStatus');
+              if (s) s.style.color = '#ef4444';
+            }
+          }
+        } else {
+          addLog('❌ API 请求失败: ' + path + ' (' + e.message + ')');
+        }
+      }
+    }
+  }
+  return {};
 }
 
 function escapeHtml(s) { if(!s) return ''; const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
@@ -1536,6 +1620,7 @@ document.addEventListener('mousemove', function(e) {
 setInterval(refreshMetrics, 60000);
 
 // 启动
+setConnStatus(false, '正在连接后端...');
 connect();
 refreshDiffGrid();
 loadAntiStallConfig();

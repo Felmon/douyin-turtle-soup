@@ -11,10 +11,10 @@ from pathlib import Path
 _cosyvoice_engine = None
 _spk_registered = False
 
-COSYVOICE_DIR = Path(__file__).resolve().parent / "CosyVoice"
+COSYVOICE_DIR = Path(__file__).resolve().parent / "CosyVoiceV7"
 PROMPT_TEXT = "You are a helpful assistant.<|endofprompt|>希望你以后能够做的比我还好呦。"
 PROMPT_WAV = "zero_shot_prompt.wav"
-SPK_ID = "default"
+DEFAULT_SPK_ID = "default"
 
 # ── Edge TTS ──
 EDGE_VOICE = "zh-CN-XiaoxiaoNeural"
@@ -90,37 +90,130 @@ def _load_cosyvoice():
     _cosyvoice_engine = AutoModel(model_dir=str(model_dir), fp16=True)
     print("[TTS] CosyVoice3 engine loaded")
 
-    prompt_wav_path = str(COSYVOICE_DIR / "asset" / PROMPT_WAV)
-    if os.path.exists(prompt_wav_path):
-        _cosyvoice_engine.add_zero_shot_spk(PROMPT_TEXT, prompt_wav_path, SPK_ID)
-        _spk_registered = True
-        print(f"[TTS] Speaker '{SPK_ID}' registered from {PROMPT_WAV}")
+    # 扫描注册 asset 目录下所有 WAV 文件（排除 cross_lingual_prompt.wav）
+    asset_dir = COSYVOICE_DIR / "asset"
+    _spk_registered = False
+    if asset_dir.exists():
+        registered = 0
+        for f in sorted(asset_dir.glob("*.wav")):
+            if f.name == "cross_lingual_prompt.wav":
+                continue
+            spk_id = "default" if f.stem == "zero_shot_prompt" else f.stem
+            try:
+                _cosyvoice_engine.add_zero_shot_spk(PROMPT_TEXT, str(f), spk_id)
+                print(f"[TTS] Speaker '{spk_id}' registered from {f.name}")
+                registered += 1
+                _spk_registered = True
+            except Exception as ex:
+                print(f"[TTS] Failed to register {f.name}: {ex}")
+        if registered == 0:
+            print(f"[TTS] WARNING: No valid .wav files in {asset_dir}")
     else:
-        print(f"[TTS] WARNING: {prompt_wav_path} not found")
+        print(f"[TTS] WARNING: {asset_dir} not found")
     return _cosyvoice_engine
 
 
-def cosyvoice_available() -> bool:
+def cosyvoice_status() -> dict:
+    """返回 CosyVoice3 详细状态字典。"""
+    # 1. 检查目录是否存在
+    if not COSYVOICE_DIR.exists():
+        return {"status": "not_found", "label": "CosyVoice3", "detail": "CosyVoice 目录不存在"}
+    # 2. 检查能否导入关键依赖（不加载模型）
+    try:
+        import torch
+        import onnxruntime
+    except ImportError:
+        return {"status": "deps_missing", "label": "CosyVoice3", "detail": "依赖未安装 (torch/onnxruntime)"}
+    # 3. 检查模型文件是否齐全（推理实际需要的文件）
+    model_dir = COSYVOICE_DIR / "pretrained_models" / "Fun-CosyVoice3-0.5B"
+    # spk2info.pt 可选（运行时自动生成），不在必需列表中
+    required = ["llm.pt", "flow.pt", "hift.pt", "campplus.onnx", "speech_tokenizer_v3.onnx"]
+    missing = [f for f in required if not (model_dir / f).exists()]
+    # 检查 CosyVoice-BlankEN 目录（Qwen tokenizer）
+    if not (model_dir / "CosyVoice-BlankEN").is_dir():
+        missing.append("CosyVoice-BlankEN/ (tokenizer 目录)")
+    else:
+        for bf in ["model.safetensors", "config.json", "vocab.json", "tokenizer_config.json", "merges.txt", "generation_config.json"]:
+            if not (model_dir / "CosyVoice-BlankEN" / bf).exists():
+                missing.append(f"CosyVoice-BlankEN/{bf}")
+    if missing:
+        dir_detail = ""
+        if model_dir.exists():
+            dir_detail = f" 目录内容: {os.listdir(str(model_dir))}"
+        return {"status": "model_missing", "label": "CosyVoice3", "detail": f"模型文件缺失: {missing}{dir_detail}"}
+    # 4. 尝试完整加载
     try:
         eng = _load_cosyvoice()
-        return _spk_registered and SPK_ID in eng.frontend.spk2info
+        if _spk_registered:
+            # 附加模型文件大小信息
+            total_bytes = sum(f.stat().st_size for f in model_dir.rglob("*") if f.is_file())
+            size_info = f"{total_bytes / (1024**3):.1f} GB" if total_bytes > 0 else "?"
+            return {"status": "ready", "label": "CosyVoice3", "detail": f"已就绪 (模型大小: {size_info})"}
+        return {"status": "error", "label": "CosyVoice3", "detail": "说话人注册失败"}
+    except Exception as e:
+        return {"status": "error", "label": "CosyVoice3", "detail": f"加载失败: {str(e)[:60]}"}
+
+
+def cosyvoice_available() -> bool:
+    return cosyvoice_status()["status"] == "ready"
+
+
+def reset_cosyvoice():
+    """清除 CosyVoice3 缓存，强制下次调用时重新加载。部署后调用。"""
+    global _cosyvoice_engine, _spk_registered
+    _cosyvoice_engine = None
+    _spk_registered = False
+
+
+def list_cosyvoice_speakers() -> dict:
+    """返回 {spk_id: {"name": display_name}} 字典。"""
+    try:
+        eng = _load_cosyvoice()
+        if eng is None or not _spk_registered:
+            return {}
+        return {
+            sid: {"name": "默认音色" if sid == DEFAULT_SPK_ID else sid}
+            for sid in eng.frontend.spk2info.keys()
+        }
     except Exception:
+        return {}
+
+
+def register_cosyvoice_speaker(spk_id: str, prompt_wav_path: str) -> bool:
+    """注册一个新的零样本说话人。"""
+    try:
+        eng = _load_cosyvoice()
+        if eng is None:
+            return False
+        eng.add_zero_shot_spk(PROMPT_TEXT, prompt_wav_path, spk_id)
+        global _spk_registered
+        _spk_registered = True
+        return True
+    except Exception as e:
+        print(f"[TTS] Register speaker failed: {e}")
         return False
 
 
-def cosyvoice_generate(text: str) -> tuple:
-    """Return (sample_rate, wav_bytes) or (None, None) on failure."""
+def cosyvoice_generate(text: str, spk_id: str = DEFAULT_SPK_ID) -> tuple:
+    """Return (sample_rate, wav_bytes) or (None, None) on failure. spk_id 选择说话人。"""
     import soundfile as sf
 
     try:
         eng = _load_cosyvoice()
         if not _spk_registered:
             return None, None
+        # 如果指定的 spk_id 不存在则回退到第一个可用说话人
+        if spk_id not in eng.frontend.spk2info:
+            spk_ids = list(eng.frontend.spk2info.keys())
+            spk_id = spk_ids[0] if spk_ids else DEFAULT_SPK_ID
+            if spk_id not in eng.frontend.spk2info:
+                return None, None
         buf = io.BytesIO()
         for j in eng.inference_zero_shot(
             text, PROMPT_TEXT,
             str(COSYVOICE_DIR / "asset" / PROMPT_WAV),
-            zero_shot_spk_id=SPK_ID, stream=False,
+            zero_shot_spk_id=spk_id,  # 非空时 frontend 用缓存的 spk2info，忽略 prompt_wav
+            stream=False,
         ):
             sf.write(buf, j["tts_speech"].squeeze().cpu().numpy(), eng.sample_rate, format="WAV")
         buf.seek(0)
@@ -146,10 +239,7 @@ async def edge_generate_async(text: str, voice: str = None, rate: float = None) 
     """Return (sample_rate, mp3_bytes) — Edge TTS 输出 MP3."""
     import edge_tts
     # rate: float → edge-tts 格式 "+XX%" / "-XX%"
-    rate_str = EDGE_RATE
-    if rate is not None and rate != 1.0:
-        pct = int(round((rate - 1.0) * 100))
-        rate_str = f"{pct:+d}%"
+    rate_str = EDGE_RATE  # 纯客户端调速，服务端始终 +0%
     communicate = edge_tts.Communicate(
         text, voice=voice or EDGE_VOICE,
         rate=rate_str, volume=EDGE_VOLUME,
@@ -189,7 +279,7 @@ def edge_generate(text: str) -> tuple:
 
 # ==================== 统一入口 ====================
 
-async def async_generate_speech(text: str, engine: str = "cosyvoice", voice: str = None, rate: float = None) -> tuple:
+async def async_generate_speech(text: str, engine: str = "cosyvoice", voice: str = None, rate: float = None, spk_id: str = None) -> tuple:
     """
     异步统一入口。Server 端 await 此函数。
     Edge TTS 直接 await，CosyVoice3 用 run_in_executor 避免阻塞。
@@ -199,7 +289,7 @@ async def async_generate_speech(text: str, engine: str = "cosyvoice", voice: str
         return await edge_generate_async(text, voice, rate)
     else:
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, lambda: cosyvoice_generate(text))
+        return await loop.run_in_executor(None, lambda: cosyvoice_generate(text, spk_id or DEFAULT_SPK_ID))
 
 
 ENGINES = {
@@ -209,8 +299,18 @@ ENGINES = {
 
 
 def list_engines() -> dict:
-    """返回 {engine_id: {"label": ..., "available": bool}}"""
-    return {eid: {"label": info["label"], "available": info["available"]()} for eid, info in ENGINES.items()}
+    """返回 {engine_id: {"label": ..., "available": bool, "status": str, "detail": str}}"""
+    cv = cosyvoice_status()
+    return {
+        "cosyvoice": {
+            "label": cv["label"], "available": cv["status"] == "ready",
+            "status": cv["status"], "detail": cv["detail"],
+        },
+        "edge": {
+            "label": "Edge TTS", "available": edge_available(),
+            "status": "ready" if edge_available() else "deps_missing", "detail": "",
+        },
+    }
 
 
 def generate_speech(text: str, engine: str = "cosyvoice") -> tuple:

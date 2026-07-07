@@ -57,7 +57,7 @@ body{color:var(--text);
 /* ── 顶部状态条 (5.5vh) ── */
 .top-bar{flex-shrink:0;height:5.5vh;min-height:42px;
   display:flex;align-items:center;justify-content:space-between;
-  padding:0 3vw;border-radius:12px;
+  padding:0 3vw;border-radius:12px;overflow:hidden;
   background:linear-gradient(90deg,rgba(12,16,38,0.95),rgba(20,12,40,0.95));
   border:1px solid rgba(0,212,255,0.25);
   backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
@@ -73,31 +73,29 @@ body{color:var(--text);
 .brand-title{font-size:1.4vh;font-weight:900;background:linear-gradient(90deg,#fff,#94a3b8);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
 .brand-sub{font-size:0.9vh;color:var(--text-dim);letter-spacing:1.5px}
 
-.status-pills{display:flex;align-items:center;gap:1.2vw}
+.status-pills{display:flex;align-items:center;gap:1.2vw;margin-right:0.8vw}
 .pill{padding:0.4vh 1.6vw;border-radius:99px;font-size:1.05vh;font-weight:700;
   background:rgba(255,255,255,0.06);color:var(--text-dim)}
-.pill.phase-playing{background:rgba(34,197,94,0.25);color:var(--green);animation:pulse 2s infinite;box-shadow:0 0 10px rgba(34,197,94,0.3)}
-.pill.phase-reading{background:rgba(0,212,255,0.25);color:var(--primary);animation:pulse 1.5s infinite;box-shadow:0 0 10px rgba(0,212,255,0.3)}
-.pill.phase-complete{background:rgba(251,191,36,0.25);color:var(--gold);box-shadow:0 0 10px rgba(251,191,36,0.3)}
-.pill.diff{background:rgba(168,85,247,0.25);color:var(--purple);box-shadow:0 0 10px rgba(168,85,247,0.3)}
+.pill.diff{background:rgba(168,85,247,0.25);color:var(--purple);box-shadow:0 0 10px rgba(168,85,247,0.3);font-weight:900;font-size:1.15vh}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.6}}
 
 /* ── 点赞进度条 (品牌和难度之间的独立行) ── */
-.like-progress{width:100%;display:flex;flex-direction:column;gap:2px;flex:1;margin:0 1.5vw;min-width:0}
-.like-progress-row{display:flex;align-items:center;gap:6px}
-.progress-track{flex:1;height:5px;background:rgba(100,116,139,0.3);border-radius:3px;position:relative;overflow:hidden}
+.like-progress{width:100%;display:flex;flex-direction:column;gap:4px;flex:1;margin:0 4.5vw 0 0;min-width:0}
+.like-progress-row{display:flex;align-items:center;gap:8px}
+.progress-track{flex:1;height:6px;background:rgba(100,116,139,0.3);border-radius:3px;position:relative;overflow:hidden}
 .like-fill{height:100%;border-radius:3px;width:0%;background:linear-gradient(90deg,#22c55e,#fbbf24);transition:width 0.3s ease}
 .progress-markers{position:absolute;inset:0;pointer-events:none}
-.progress-markers .marker{position:absolute;top:-3px;width:2px;height:11px;background:var(--primary);transform:translateX(-50%);border-radius:1px}
+.progress-markers .marker{position:absolute;top:-3px;width:2px;height:12px;background:var(--primary);transform:translateX(-50%);border-radius:1px}
 .progress-markers .marker.reached{background:var(--gold);box-shadow:0 0 6px var(--gold)}
-.progress-label{font-size:1.05vh;color:var(--gold);white-space:nowrap;min-width:3vw;text-align:right;font-weight:900}
-.like-icon{font-size:1.6vh;flex-shrink:0;line-height:1}
-.like-label{font-size:1.0vh;color:var(--text-dim);white-space:nowrap;flex-shrink:0;font-weight:600;margin-right:4px}
+.progress-label{font-size:1.15vh;color:var(--gold);white-space:nowrap;min-width:3.5vw;text-align:right;font-weight:900}
+.like-icon{font-size:1.8vh;flex-shrink:0;line-height:1}
+.threshold-row{display:flex;align-items:center;width:100%}
 /* 阈值效果标签（在进度条下方） */
-.like-thresholds{display:flex;position:relative;height:1.6vh;margin:0 0.5vw}
-.like-thresholds .tl{position:absolute;font-size:0.9vh;color:var(--text-dimmer);transform:translateX(-50%);white-space:nowrap;line-height:1.2;transition:color 0.3s,font-weight 0.3s}
-.like-thresholds .tl.reached{color:var(--gold);font-weight:700}
-.like-thresholds .tl.active{color:var(--primary);font-weight:700;text-shadow:0 0 8px rgba(0,212,255,0.5)}
+.like-thresholds{flex:1;display:flex;position:relative;height:2vh;margin-left:6px;padding:2px 2vw 0 0}
+.like-thresholds .tl{position:absolute;font-size:1.05vh;color:var(--text-dimmer);transform:translateX(-50%);white-space:nowrap;line-height:1.3;transition:color 0.3s,font-weight 0.3s;letter-spacing:0.5px}
+.tl-label{font-size:0.95vh;color:var(--text-dimmer);white-space:nowrap;flex-shrink:0;letter-spacing:0.3px}
+.like-thresholds .tl.reached{color:var(--gold);font-weight:800;text-shadow:0 0 8px rgba(251,191,36,0.3)}
+.like-thresholds .tl.active{color:var(--primary);font-weight:800;text-shadow:0 0 10px rgba(0,212,255,0.5)}
 
 /* ── 汤面区 (11vh，自适应字号) ── */
 .surface-area{flex-shrink:0;height:11vh;min-height:11vh;max-height:11vh;
@@ -118,13 +116,14 @@ body{color:var(--text);
   font-family:'ZCOOL KuaiLe','Noto Sans SC',serif;
   text-shadow:0 1px 3px rgba(0,0,0,0.5);
   word-break:break-word;
+  overflow-wrap:break-word;
   white-space:normal;
   width:100%;
   /* 字号由 JS 动态调整以铺满 */
   font-size:2vh}
 
 /* ── 谜底揭示区 (核心, 缩小约 1/3) ── */
-.reveal-area{flex:1;min-height:24vh;max-height:33vh;
+.reveal-area{flex:1;min-height:0;
   border-radius:16px;
   background:linear-gradient(135deg,rgba(0,212,255,0.04),rgba(168,85,247,0.04));
   border:1px solid rgba(0,212,255,0.15);
@@ -148,14 +147,11 @@ body{color:var(--text);
 .reveal-scroll{flex:1;overflow-y:hidden;padding:1.5vh 2.5vw 1vh;
   display:flex;flex-wrap:wrap;align-content:flex-start;gap:0.5vw;
   justify-content:center;align-items:flex-start;
-  scrollbar-width:thin;scrollbar-color:rgba(0,212,255,0.3) transparent;
   position:relative;z-index:2;--cb-font-size:min(3.8vh,4.2vw);--cb-w:5.2vw;--cb-h:5.5vh}
-.reveal-scroll::-webkit-scrollbar{width:3px}
-.reveal-scroll::-webkit-scrollbar-thumb{background:rgba(0,212,255,0.3);border-radius:2px}
 
 /* ── 字格 (核心视觉, 固定大方格) ── */
 .char-box{width:var(--cb-w);height:var(--cb-h);min-width:30px;min-height:34px;
-  display:flex;align-items:center;justify-content:center;
+  display:flex;align-items:center;justify-content:center;overflow:hidden;
   font-size:var(--cb-font-size);font-weight:900;border-radius:8px;transition:all 0.4s;
   position:relative;font-family:'ZCOOL KuaiLe',serif}
 .char-box.revealed{color:var(--primary);
@@ -228,12 +224,12 @@ body{color:var(--text);
   transition:all 0.2s}
 .gift-item:hover{background:rgba(0,212,255,0.15);transform:translateY(-1px)}
 .gift-item .gi-icon{font-size:2.2vh;line-height:1;flex-shrink:0;filter:drop-shadow(0 0 4px rgba(0,212,255,0.4));display:flex;align-items:center;justify-content:center}
-.gift-item .gi-icon img{width:2.8vh;height:2.8vh;object-fit:contain;filter:drop-shadow(0 0 3px rgba(0,212,255,0.5))}
+.gift-item .gi-icon img{width:2.8vh;height:2.8vh;object-fit:contain;max-width:100%;max-height:100%;filter:drop-shadow(0 0 3px rgba(0,212,255,0.5))}
 .gift-item .gi-name{font-size:1.1vh;color:var(--text);font-weight:900;white-space:nowrap;line-height:1}
 .gift-item .gi-func{font-size:0.95vh;color:var(--gold);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:11vw;line-height:1;font-weight:600}
 
 /* ── 底部互动区 (flex 撑满剩余空间) ── */
-.bottom-area{flex:1;min-height:130px;
+.bottom-area{flex:1;min-height:8vh;
   display:flex;gap:2vw;margin-bottom:1vh}
 
 .danmaku-panel{flex:3;border-radius:14px;
@@ -479,6 +475,29 @@ body{color:var(--text);
   .gift-item .gi-icon img{width:2vh;height:2vh}
   .gift-item .gi-name{font-size:0.85vh}
   .gift-item .gi-func{font-size:0.75vh;max-width:8vw}
+  /* 排行榜自适应缩紧 */
+  .tier-top3{min-height:7vh;gap:0.4vw;padding:0.4vh 0.4vw}
+  .podium-item{padding:0.3vh 0.4vw;gap:0.1vh}
+  .podium-item .rank-icon{font-size:2.2vh}
+  .podium-item.podium-1 .rank-icon{font-size:2.8vh}
+  .podium-item .name{font-size:1.2vh}
+  .podium-item.podium-1 .name{font-size:1.6vh}
+  .podium-item.podium-2 .name,.podium-item.podium-3 .name{font-size:1.0vh}
+  .podium-item .score{font-size:0.9vh}
+  .podium-item .podium-stand{height:0.8vh}
+  .podium-item.podium-1 .podium-stand{height:1.5vh}
+  .podium-item.podium-2 .podium-stand{height:1.0vh}
+  .podium-item.podium-3 .podium-stand{height:0.7vh}
+  /* 底部互动区缩紧 */
+  .bottom-area{min-height:8vh;gap:1.2vw}
+  .info-panel{padding:0.6vh 1.2vw}
+  .tier-item{font-size:1.0vh;padding:0.15vh 0}
+  .tier-item .rank-num{font-size:0.9vh;width:1.5vw}
+  .tier-item .score{font-size:0.9vh}
+  .tier-item .tier-badge{font-size:0.75vh;padding:0.05vh 0.4vw}
+  .danmaku-item{font-size:1.2vh;padding:0.2vh 0.4vw;gap:0.8vw}
+  .dm-user{max-width:12vw;font-size:1.1vh}
+  .dm-tag{font-size:0.85vh;padding:0.1vh 0.6vw}
 }
 @media (max-aspect-ratio: 3/5) {
   .gift-item .gi-name{font-size:0.65vh}
@@ -487,6 +506,13 @@ body{color:var(--text);
   .gift-list{gap:0.15vw}
   .gift-item .gi-icon{font-size:1.2vh}
   .gift-item .gi-icon img{width:1.4vh;height:1.4vh}
+  .podium-item .rank-icon{font-size:1.6vh}
+  .podium-item.podium-1 .rank-icon{font-size:2.0vh}
+  .podium-item .name{font-size:0.9vh}
+  .podium-item.podium-1 .name{font-size:1.2vh}
+  .podium-item.podium-2 .name,.podium-item.podium-3 .name{font-size:0.8vh}
+  .tier-item{font-size:0.85vh}
+  .danmaku-item{font-size:1.0vh}
 }
 </style>
 </head>
@@ -507,25 +533,26 @@ body{color:var(--text);
     <div class="like-progress" id="likeProgress">
       <div class="like-progress-row">
         <span class="like-icon">👍</span>
-        <span class="like-label">点赞解锁</span>
         <div class="progress-track">
           <div class="like-fill" id="likeFill"></div>
           <div class="progress-markers" id="likeMarkers"></div>
         </div>
         <span class="progress-label" id="likeLabel">0/--</span>
       </div>
-      <div class="like-thresholds" id="likeThresholds"></div>
+      <div class="threshold-row">
+        <span class="tl-label">点赞切换难度</span>
+        <div class="like-thresholds" id="likeThresholds"></div>
+      </div>
     </div>
     <div class="status-pills">
-      <span class="pill diff" id="diffBadge">简单</span>
-      <span class="pill phase-lobby" id="phaseBadge">等待开局</span>
+      <span class="pill diff" id="diffBadge">难度：简单</span>
     </div>
   </div>
 
-  <!-- 汤面 -->
-  <div class="surface-area fade-in" id="surfaceArea">
+  <!-- 汤面区 -->
+  <div class="surface-area fade-in">
     <div class="surface-label">汤面</div>
-    <div class="surface-text" id="surfaceText">等待主播开局...</div>
+    <div class="surface-text" id="surfaceText"></div>
   </div>
 
   <!-- 谜底揭示 -->
@@ -641,39 +668,13 @@ function renderLikeThresholds() {
     const pct = (s.like_threshold / maxThreshold * 100);
     return '<span class="marker" style="left:' + pct + '%" data-slot="' + s.id + '"></span>';
   }).join('');
-  // 生成阈值标签（显示阈值和功能名）
+  // 生成阈值标签
   labelsEl.innerHTML = likeSlots.map(s => {
     const pct = (s.like_threshold / maxThreshold * 100);
-    return '<span class="tl" style="left:' + pct + '%" data-slot="' + s.id + '">' + s.like_threshold + '→' + escapeHtml(s.name) + '</span>';
+    const _dn = escapeHtml(s.name).replace('难度-', '');
+    return '<span class="tl" style="left:' + pct + '%" data-slot="' + s.id + '">' + s.like_threshold + '→' + _dn + '</span>';
   }).join('');
 }
-
-function fitSurfaceText() {
-  // 自适应调整汤面字号以铺满板块
-  const el = document.getElementById('surfaceText');
-  const area = document.getElementById('surfaceArea');
-  if (!el || !area) return;
-  const text = el.textContent.trim();
-  if (!text) { el.style.fontSize = '2vh'; return; }
-  el.style.fontSize = '1.2vh';
-  el.style.lineHeight = '1.3';
-  requestAnimationFrame(() => {
-    const maxH = area.clientHeight - 50;
-    const maxW = area.clientWidth - 70;
-    let lo = 1.2, hi = 6, fit = 1.2;
-    for (let i = 0; i < 12; i++) {
-      const mid = (lo + hi) / 2;
-      el.style.fontSize = mid + 'vh';
-      if (el.scrollHeight <= maxH && el.scrollWidth <= maxW) {
-        fit = mid; lo = mid;
-      } else {
-        hi = mid;
-      }
-    }
-    el.style.fontSize = fit + 'vh';
-  });
-}
-window.addEventListener('resize', fitSurfaceText);
 
 function fitRevealChars() {
   const container = document.getElementById('revealScroll');
@@ -704,6 +705,34 @@ function fitRevealChars() {
   container.style.setProperty('--cb-h', Math.round(best * 1.3 + 8) + 'px');
 }
 window.addEventListener('resize', fitRevealChars);
+if (window.ResizeObserver) {
+  const rs = document.getElementById('revealScroll');
+  if (rs) new ResizeObserver(() => fitRevealChars()).observe(rs);
+}
+
+function fitSurfaceText() {
+  const el = document.getElementById('surfaceText');
+  if (!el || !el.textContent) return;
+  const area = el.parentElement;
+  const label = area.querySelector('.surface-label');
+  const labelH = label ? label.offsetHeight : 0;
+  const cs = getComputedStyle(area);
+  const padH = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+  const availH = area.clientHeight - padH - labelH - 4;
+  let lo = 8, hi = 60, best = 8;
+  while (lo <= hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    el.style.fontSize = mid + 'px';
+    if (el.scrollHeight <= availH) { best = mid; lo = mid + 1; }
+    else { hi = mid - 1; }
+  }
+  el.style.fontSize = best + 'px';
+}
+if (window.ResizeObserver) {
+  const sa = document.querySelector('.surface-area');
+  if (sa) new ResizeObserver(() => fitSurfaceText()).observe(sa);
+}
+window.addEventListener('resize', fitSurfaceText);
 
 let ws = null;
 let reconnectTimer = null;
@@ -718,6 +747,7 @@ function connect() {
   ws.onopen = () => {
     console.log('[WS] 已连接');
     if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+    fetchSlotConfig();
   };
   ws.onclose = () => { console.log('[WS] 断开'); scheduleReconnect(); };
   ws.onerror = (e) => console.warn('[WS] 错误', e);
@@ -735,22 +765,28 @@ function handleMessage(msg) {
     case 'state_sync':
       currentRoom = msg.room;
       if (msg.room) {
-        document.getElementById('surfaceText').textContent = msg.room.surface || '等待主播开局...';
-        fitSurfaceText();
-        if (msg.room.charStates) renderCharStates(msg.room.charStates);
-        if (msg.room.difficulty_name) document.getElementById('diffBadge').textContent = msg.room.difficulty_name;
+        if (msg.room.difficulty_name) document.getElementById('diffBadge').textContent = '难度：' + msg.room.difficulty_name;
         if (msg.room.phase) setPhase(msg.room.phase);
+        if (msg.room.char_states) {
+          renderCharStates(msg.room.char_states);
+          updateProgress(msg.room.char_states);
+        }
+        if (msg.room.soup_text) {
+          document.getElementById('surfaceText').textContent = msg.room.soup_text;
+          fitSurfaceText();
+        }
       }
       break;
     case 'game_start':
-      document.getElementById('surfaceText').textContent = msg.surface || '';
-      fitSurfaceText();
-      document.getElementById('diffBadge').textContent = msg.difficulty_name || '';
+      document.getElementById('diffBadge').textContent = '难度：' + (msg.difficulty_name || '');
       setPhase(msg.phase || 'playing');
       renderCharStates(msg.charStates);
       updateProgress(msg.charStates);
       clearDanmaku();
       document.getElementById('answerBubbles').innerHTML = '';
+      // 填充汤面文本
+      document.getElementById('surfaceText').textContent = msg.surface || '';
+      fitSurfaceText();
       // 朗读汤面 (TTS 字幕条)
       speakTTS('汤面：' + (msg.surface || ''), 8000);
       break;
@@ -868,12 +904,15 @@ function updateProgress(states) {
   const revealed = content.filter(s => s.revealed).length;
   const total = content.length;
   const pct = total > 0 ? (revealed / total * 100) : 0;
-  document.getElementById('progressText').textContent = Math.round(pct) + '%';
-  const fill = document.getElementById('progressFill');
-  fill.style.width = pct + '%';
-  fill.className = 'progress-fill';
-  if (pct > 66) fill.classList.add('danger');
-  else if (pct > 33) fill.classList.add('warning');
+  const pctEl = document.getElementById('progressText');
+  const fillEl = document.getElementById('progressFill');
+  if (pctEl) pctEl.textContent = Math.round(pct) + '%';
+  if (fillEl) {
+    fillEl.style.width = pct + '%';
+    fillEl.className = 'progress-fill';
+    if (pct > 66) fillEl.classList.add('danger');
+    else if (pct > 33) fillEl.classList.add('warning');
+  }
 }
 
 // ══════════════════════════════════════════
@@ -1123,11 +1162,7 @@ async function speakTTS(text, hideMs) {
 // ══════════════════════════════════════════
 // 阶段
 // ══════════════════════════════════════════
-const PHASE_NAMES = {lobby:'等待开局', reading:'朗读汤面', playing:'猜谜中', complete:'通关'};
 function setPhase(phase) {
-  const badge = document.getElementById('phaseBadge');
-  badge.className = 'pill phase-' + phase;
-  badge.textContent = PHASE_NAMES[phase] || phase;
   // 非游戏阶段隐藏排行榜
   const infoPanel = document.querySelector('.info-panel');
   if (infoPanel) {
@@ -1167,9 +1202,6 @@ function renderTierList(list) {
   // 前3按领奖台顺序排列: [2nd, 1st, 3rd]
   const top3 = list.slice(0, 3);
   const rest = list.slice(3);
-  const podiumOrder = top3.length >= 2
-    ? [top3[1], top3[0], top3[2]]  // 金银铜 → 银金银铜? No: [2nd, 1st, 3rd]
-    : top3;
   // 重新排：索引0→银(左), 1→金(中), 2→铜(右)
   let ordered;
   if (top3.length === 1) {
@@ -1250,8 +1282,8 @@ function escapeHtml(s) {
 // ══════════════════════════════════════════
 connect();
 fetchSlotConfig();
-fitSurfaceText();
 fitRevealChars();
+fitSurfaceText();
 // 初始隐藏排行榜，等游戏开始时显示
 document.querySelector('.info-panel').style.display = 'none';
 refreshLeaderboard();

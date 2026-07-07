@@ -9,7 +9,3 @@ def client():
         yield c
 
 
-@pytest.fixture
-def auth_headers():
-    from backend.server import ADMIN_TOKEN
-    return {"Authorization": f"Bearer {ADMIN_TOKEN}"}

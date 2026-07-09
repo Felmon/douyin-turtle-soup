@@ -27,6 +27,12 @@ body{background:#0c0f1e;color:#e2e8f0;font-family:-apple-system,'PingFang SC','M
 .header .brand-sub{font-size:11px;color:#64748b;margin-top:2px}
 .header-actions{display:flex;gap:8px;align-items:center}
 
+.auth-bar{display:flex;align-items:center;gap:8px;padding:8px 16px;background:rgba(18,22,48,0.4);border-radius:8px;border:1px solid rgba(255,255,255,0.05);font-size:12px;flex-wrap:wrap}
+.auth-bar.auth-ok{background:rgba(34,197,94,0.08);border-color:rgba(34,197,94,0.2)}
+.auth-bar.auth-trial{background:rgba(234,179,8,0.08);border-color:rgba(234,179,8,0.2)}
+.auth-bar.auth-none{background:rgba(239,68,68,0.08);border-color:rgba(239,68,68,0.2)}
+.auth-actions{display:inline-flex;align-items:center;gap:6px;margin-left:auto}
+
 .btn{padding:6px 14px;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;transition:all 0.2s;display:inline-flex;align-items:center;gap:5px}
 .btn-primary{background:linear-gradient(135deg,#22c55e,#16a34a);color:#fff;box-shadow:0 2px 8px rgba(34,197,94,0.25)}
 .btn-primary:hover{box-shadow:0 4px 16px rgba(34,197,94,0.45);transform:translateY(-1px)}
@@ -42,12 +48,25 @@ body{background:#0c0f1e;color:#e2e8f0;font-family:-apple-system,'PingFang SC','M
 .btn-danger:hover{box-shadow:0 4px 16px rgba(239,68,68,0.45);transform:translateY(-1px)}
 .btn-sm{padding:4px 10px;font-size:11px}
 
+/* 思考模式开关 */
+.toggle-wrap{display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px;color:#94a3b8;user-select:none}
+.toggle-wrap input{display:none}
+.toggle-track{width:36px;height:20px;background:rgba(100,116,139,0.3);border-radius:10px;position:relative;transition:all 0.25s;flex-shrink:0}
+.toggle-track::after{content:'';position:absolute;top:2px;left:2px;width:16px;height:16px;background:#94a3b8;border-radius:50%;transition:all 0.25s}
+.toggle-wrap input:checked+.toggle-track{background:rgba(0,212,255,0.3)}
+.toggle-wrap input:checked+.toggle-track::after{left:18px;background:#00d4ff;box-shadow:0 0 6px rgba(0,212,255,0.4)}
+
 .tabs{display:flex;gap:4px;padding:4px;background:rgba(18,22,48,0.4);border-radius:10px;width:fit-content}
 .tab{padding:8px 16px;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;color:#64748b;transition:all 0.2s}
 .tab.active{background:rgba(0,212,255,0.15);color:#00d4ff}
 
 .tab-content{display:none;background:rgba(18,22,48,0.6);border-radius:12px;border:1px solid rgba(255,255,255,0.06);padding:20px;min-height:500px}
 .tab-content.active{display:block}
+
+/* 方向选择器 */
+.dir-chip{display:inline-flex;align-items:center;padding:4px 12px;border-radius:20px;font-size:11px;cursor:pointer;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);color:#94a3b8;transition:all 0.2s;user-select:none}
+.dir-chip:hover{background:rgba(0,212,255,0.1);border-color:rgba(0,212,255,0.25);color:#e2e8f0}
+.dir-chip.active{background:rgba(0,212,255,0.18);border-color:#00d4ff;color:#00d4ff;font-weight:600;box-shadow:0 0 8px rgba(0,212,255,0.15)}
 
 /* CosyVoice3 禁用态 */
 .cosyvoice-disabled{opacity:0.4;pointer-events:none;transition:opacity 0.3s}
@@ -78,6 +97,9 @@ body{background:#0c0f1e;color:#e2e8f0;font-family:-apple-system,'PingFang SC','M
 .diff-btn .name{font-size:14px;font-weight:700;color:#e2e8f0;margin-bottom:2px}
 .diff-btn .range{font-size:10px;color:#64748b;margin-bottom:2px}
 .diff-btn .multi{font-size:11px;color:#fbbf24;font-weight:600}
+.ai-diff-btn{display:inline-flex;align-items:center;padding:4px 14px;border-radius:6px;font-size:12px;cursor:pointer;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);color:#94a3b8;transition:all 0.2s;user-select:none}
+.ai-diff-btn:hover{background:rgba(0,212,255,0.1);border-color:rgba(0,212,255,0.3);color:#e2e8f0}
+.ai-diff-btn.active{background:rgba(0,212,255,0.18);border-color:#00d4ff;color:#00d4ff;font-weight:600}
 
 .slot-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
 .slot-card{padding:10px;background:rgba(0,0,0,0.3);border-radius:8px;border:1px solid rgba(255,255,255,0.05);position:relative;cursor:pointer;transition:all 0.2s}
@@ -163,6 +185,24 @@ canvas{max-width:100%}
     </div>
   </div>
 
+  <!-- 授权状态栏 -->
+  <div class="auth-bar" id="authBar">
+    <span id="authIcon">●</span>
+    <span id="authText">检查授权中...</span>
+    <span id="authReactivate" style="display:none;margin-left:12px">
+      <a href="#" onclick="toggleAuthInput()" style="color:#94a3b8;font-size:11px;text-decoration:none;border:1px solid rgba(255,255,255,0.15);padding:2px 10px;border-radius:4px">重新激活</a>
+    </span>
+    <span class="auth-actions" id="authActions" style="display:none">
+      <input type="text" id="authKeyInput" placeholder="输入授权码" style="padding:4px 10px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.15);border-radius:6px;color:#e2e8f0;font-size:11px;width:200px">
+      <button class="btn btn-sm" onclick="activateAuth()" style="padding:4px 12px;font-size:11px">激活</button>
+      <button class="btn btn-sm" onclick="startTrial()" style="padding:4px 12px;font-size:11px">免费试用</button>
+      <span style="color:#64748b;font-size:11px;border-left:1px solid rgba(255,255,255,0.1);padding-left:10px">
+        机器码: <code id="authMachineId" style="color:#94a3b8;font-size:11px;user-select:all">--</code>
+        <a href="#" onclick="copyMachineId()" style="color:#94a3b8;font-size:10px;margin-left:4px">[复制]</a>
+      </span>
+    </span>
+  </div>
+
   <div class="tabs">
     <div class="tab active" data-tab="game" onclick="switchTab(this)">🎮 游戏控制</div>
     <div class="tab" data-tab="slots" onclick="switchTab(this)">🎁 礼物槽位</div>
@@ -192,7 +232,7 @@ canvas{max-width:100%}
         </div>
 
         <div class="section">
-          <h2>难度选择（5档）</h2>
+          <h2>难度选择</h2>
           <div class="diff-grid" id="diffGrid"></div>
           <div style="font-size:11px;color:#64748b;margin-top:6px">当前难度：<span id="curDiff" style="color:#00d4ff;font-weight:600">-</span></div>
           <div style="display:flex;gap:12px;margin-bottom:6px;font-size:11px;color:#64748b">
@@ -259,13 +299,11 @@ canvas{max-width:100%}
         </div>
       </div>
     </div>
-
-
   </div>
-</div>
+  </div>
 
   <!-- 礼物槽位 -->
-    <div class="tab-content" id="tab-slots">
+  <div class="tab-content" id="tab-slots">
     <div class="section">
       <h2>9个固定槽位（4效果 + 5难度）</h2>
       <div style="font-size:11px;color:#64748b;margin-bottom:12px">点击槽位从368+抖音礼物中选择绑定。已绑定的礼物在直播间送礼即触发对应效果。点击槽位右上角可启用/禁用。点击「点赞」将槽位设为点赞模式，送礼累积到设定次数后揭示一字。</div>
@@ -306,12 +344,40 @@ canvas{max-width:100%}
   <div class="tab-content" id="tab-ai">
     <div class="section">
       <h2>AI 出题（主）· 手动导入（辅）</h2>
+      <div style="margin-bottom:12px;">
+        <div style="margin-bottom:8px;font-size:12px;color:#94a3b8">🎯 选题方向</div>
+        <div id="dirSelector" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">
+          <!-- 由 loadAiDirections() 动态渲染 -->
+        </div>
+      </div>
+      <div style="display:flex;gap:12px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+        <div>
+          <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">难度</div>
+          <div id="aiDiffSelector" style="display:flex;gap:4px">
+            <div class="ai-diff-btn active" data-diff="easy" onclick="setAiDiff('easy')">简单</div>
+            <div class="ai-diff-btn" data-diff="medium" onclick="setAiDiff('medium')">一般</div>
+            <div class="ai-diff-btn" data-diff="hard" onclick="setAiDiff('hard')">困难</div>
+            <div class="ai-diff-btn" data-diff="hell" onclick="setAiDiff('hell')">地狱</div>
+            <div class="ai-diff-btn" data-diff="void" onclick="setAiDiff('void')">无人区</div>
+            <div class="ai-diff-btn" data-diff="auto" onclick="setAiDiff('auto')">自适应</div>
+          </div>
+        </div>
+        <div>
+          <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">数量</div>
+          <select id="aiCountSelect" style="padding:6px 10px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.1);border-radius:6px;color:#e2e8f0;font-size:12px">
+            <option value="1">1 道</option>
+            <option value="3">3 道</option>
+            <option value="5" selected>5 道</option>
+            <option value="10">10 道</option>
+          </select>
+        </div>
+      </div>
       <div style="margin-bottom:12px">
-        <button class="btn btn-primary" onclick="aiGenerate()">🤖 AI 生成 5 道新题</button>
-        <span style="font-size:11px;color:#64748b;margin-left:8px">使用 DeepSeek 自动生成符合当前难度的题目，生成后人工审核入库</span>
+        <button class="btn btn-primary" onclick="aiGenerate()">🤖 AI 生成</button>
+        <span style="font-size:11px;color:#64748b;margin-left:8px">使用 DeepSeek 自动生成，生成后人工审核入库</span>
       </div>
       <div id="aiPendingList"></div>
-      <div id="aiBatchActions" style="display:none;margin-top:8px;display:flex;gap:8px">
+      <div id="aiBatchActions" style="display:none;margin-top:8px;gap:8px">
         <button class="btn btn-success btn-sm" onclick="approveAllAi()">✓ 全部入库</button>
         <button class="btn btn-danger btn-sm" onclick="rejectAllAi()">✗ 全部废弃</button>
       </div>
@@ -334,6 +400,14 @@ canvas{max-width:100%}
           </div>
         </div>
       </div>
+      <div style="display:flex;align-items:center;gap:16px;margin-top:8px;flex-wrap:wrap">
+        <label class="toggle-wrap">
+          <input type="checkbox" id="cfgLlmReasoning" checked onchange="onReasoningToggle(this.checked)">
+          <span class="toggle-track"></span>
+          🧠 思考模式
+        </label>
+        <span style="font-size:10px;color:#64748b" id="reasoningHint">推理模型需提高 token 和超时配额</span>
+      </div>
       <div style="margin-top:8px">
         <label style="font-size:11px;color:#94a3b8;display:block;margin-bottom:4px">API Key</label>
         <div style="display:flex;gap:8px">
@@ -345,6 +419,39 @@ canvas{max-width:100%}
         <button class="btn btn-cyan" onclick="saveLlmConfig()">💾 保存配置</button>
         <button class="btn btn-ghost" onclick="detectLlmModel()">🔍 检测模型</button>
         <span id="llmConfigStatus" style="font-size:11px;color:#64748b;align-self:center"></span>
+      </div>
+    </div>
+    <!-- 问答模型配置 -->
+    <div class="section" style="margin-top:12px;border-top:1px solid rgba(255,255,255,0.06);padding-top:12px">
+      <h3 style="font-size:13px;margin:0">💬 问答模型</h3>
+      <p style="font-size:10px;color:#64748b;margin:4px 0 8px">用于游戏中「是/不是/是也不是」弹幕分类，固定普通模式无推理</p>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div>
+          <label style="font-size:11px;color:#94a3b8;display:block;margin-bottom:4px">API 地址</label>
+          <input type="text" id="cfgQaBaseUrl" placeholder="留空则使用出题模型的 API 地址" style="width:100%;padding:8px 10px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.1);border-radius:6px;color:#e2e8f0;font-size:12px">
+        </div>
+        <div>
+          <label style="font-size:11px;color:#94a3b8;display:block;margin-bottom:4px">模型</label>
+          <div style="display:flex;gap:4px">
+            <select id="cfgQaModel" style="flex:1;padding:8px 10px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.1);border-radius:6px;color:#e2e8f0;font-size:12px">
+              <option value="mimo-v2.5">mimo-v2.5</option>
+              <option value="">（沿用出题模型）</option>
+            </select>
+            <button class="btn btn-ghost btn-sm" onclick="fetchQaModels()" title="从 API 获取模型列表" style="font-size:10px;padding:4px 10px">📋 获取模型</button>
+          </div>
+        </div>
+      </div>
+      <div style="margin-top:8px">
+        <label style="font-size:11px;color:#94a3b8;display:block;margin-bottom:4px">API Key</label>
+        <div style="display:flex;gap:8px">
+          <input type="password" id="cfgQaApiKey" placeholder="留空则使用出题模型的 Key" style="flex:1;padding:8px 10px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.1);border-radius:6px;color:#e2e8f0;font-size:12px">
+          <button class="btn btn-ghost btn-sm" onclick="toggleQaApiKeyVis()" style="font-size:10px;padding:4px 10px">👁</button>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <button class="btn btn-cyan" onclick="saveQaConfig()">💾 保存问答配置</button>
+        <button class="btn btn-ghost" onclick="detectQaModel()">🔍 检测问答模型</button>
+        <span id="qaConfigStatus" style="font-size:11px;color:#64748b;align-self:center"></span>
       </div>
     </div>
   </div>
@@ -507,6 +614,10 @@ let currentSlots = [];
 let currentSlotEditing = null;
 let pendingAiSoups = [];
 let selectedDiff = 'medium';
+let selectedDirection = 'random';
+let aiDiff = 'medium';
+let aiCount = 5;
+const DIRECTION_CSS = {'random':'','mystery':'','horror':'','daily':'','sci-fi':'','ethics':'','fairy-tale':'','urban':'','history':'','dark-humor':'','psychological':''};
 
 function connect() {
   if (ws) ws.close();
@@ -689,8 +800,17 @@ async function loadLlmConfig() {
       }
       sel.value = r.model || 'deepseek-v4-flash';
       document.getElementById('cfgLlmApiKey').value = r.api_key_configured ? '••••••••' : '';
+      // 思考模式
+      const reasoning = r.reasoning !== undefined ? r.reasoning : true;
+      document.getElementById('cfgLlmReasoning').checked = reasoning;
+      onReasoningToggle(reasoning);
     }
   } catch(e) {}
+}
+
+function onReasoningToggle(on) {
+  const el = document.getElementById('reasoningHint');
+  if (el) el.textContent = on ? '🧠 推理模型：高 token 配额 + 长超时，适合深度思考' : '⚡ 普通模型：标准 token 配额 + 短超时，响应更快';
 }
 
 async function saveLlmConfig() {
@@ -700,6 +820,7 @@ async function saveLlmConfig() {
     const body = {
       base_url: document.getElementById('cfgLlmBaseUrl').value.trim(),
       model: document.getElementById('cfgLlmModel').value.trim(),
+      reasoning: document.getElementById('cfgLlmReasoning').checked,
     };
     const key = document.getElementById('cfgLlmApiKey').value.trim();
     if (key && key !== '••••••••') body.api_key = key;
@@ -724,7 +845,7 @@ async function detectLlmModel() {
   const key = document.getElementById('cfgLlmApiKey').value.trim();
   if (!baseUrl || !model) { el.textContent = '❌ 请先填写 API 地址和模型'; return; }
   // 先保存当前配置到服务器
-  const saveBody = { base_url: baseUrl, model: model };
+  const saveBody = { base_url: baseUrl, model: model, reasoning: document.getElementById('cfgLlmReasoning').checked };
   if (key && key !== '••••••••') saveBody.api_key = key;
   await apiPost('/api/config', saveBody);
   // 调用检测接口
@@ -740,13 +861,93 @@ async function fetchLlmModels() {
   // 先确保配置已保存
   const baseUrl = document.getElementById('cfgLlmBaseUrl').value.trim();
   const key = document.getElementById('cfgLlmApiKey').value.trim();
-  const saveBody = { base_url: baseUrl };
+  const saveBody = { base_url: baseUrl, reasoning: document.getElementById('cfgLlmReasoning').checked };
   if (key && key !== '••••••••') saveBody.api_key = key;
   await apiPost('/api/config', saveBody);
   // 调用模型列表接口
   const r = await apiGet('/api/admin/llm-models');
   if (r.ok && r.models && r.models.length > 0) {
     const sel = document.getElementById('cfgLlmModel');
+    const current = sel.value;
+    sel.innerHTML = r.models.map(m => '<option value="' + escapeHtml(m) + '">' + escapeHtml(m) + '</option>').join('');
+    if (Array.from(sel.options).some(o => o.value === current)) {
+      sel.value = current;
+    }
+    el.textContent = '✅ 获取到 ' + r.models.length + ' 个模型';
+  } else {
+    el.textContent = '❌ 获取失败: ' + (r.error || '未知错误');
+  }
+  setTimeout(() => el.textContent = '', 6000);
+}
+
+// ── 问答模型配置 ──
+async function loadQaConfig() {
+  try {
+    const r = await apiGet('/api/config');
+    if (!r) return;
+    document.getElementById('cfgQaBaseUrl').value = r.qa_base_url || '';
+    const sel = document.getElementById('cfgQaModel');
+    if (r.qa_model && !Array.from(sel.options).some(o => o.value === r.qa_model)) {
+      sel.add(new Option(r.qa_model, r.qa_model));
+    }
+    sel.value = r.qa_model || '';
+    if (r.qa_api_key_configured) {
+      document.getElementById('cfgQaApiKey').value = '••••••••';
+    }
+  } catch(e) {}
+}
+
+async function saveQaConfig() {
+  const el = document.getElementById('qaConfigStatus');
+  el.textContent = '保存中...';
+  try {
+    const body = {
+      qa_base_url: document.getElementById('cfgQaBaseUrl').value.trim(),
+      qa_model: document.getElementById('cfgQaModel').value.trim(),
+    };
+    const key = document.getElementById('cfgQaApiKey').value.trim();
+    if (key && key !== '••••••••') body.qa_api_key = key;
+    const r = await apiPost('/api/config', body);
+    el.textContent = r.ok ? '✅ 已保存' : '❌ 保存失败';
+    if (r.ok) setTimeout(() => el.textContent = '', 3000);
+  } catch(e) {
+    el.textContent = '❌ 请求失败';
+  }
+}
+
+function toggleQaApiKeyVis() {
+  const el = document.getElementById('cfgQaApiKey');
+  el.type = el.type === 'password' ? 'text' : 'password';
+}
+
+async function detectQaModel() {
+  const el = document.getElementById('qaConfigStatus');
+  el.textContent = '⏳ 检测中...';
+  const baseUrl = document.getElementById('cfgQaBaseUrl').value.trim();
+  const model = document.getElementById('cfgQaModel').value.trim();
+  const key = document.getElementById('cfgQaApiKey').value.trim();
+  const saveBody = {};
+  if (baseUrl) saveBody.qa_base_url = baseUrl;
+  if (model) saveBody.qa_model = model;
+  if (key && key !== '••••••••') saveBody.qa_api_key = key;
+  await apiPost('/api/config', saveBody);
+  const r = await apiPost('/api/admin/qa-ping', {});
+  el.textContent = r.ok ? '✅ ' + r.msg : '❌ ' + r.msg;
+  if (r.error) addLog('❌ 问答模型检测失败: ' + r.error);
+  setTimeout(() => el.textContent = '', 8000);
+}
+
+async function fetchQaModels() {
+  const el = document.getElementById('qaConfigStatus');
+  el.textContent = '⏳ 获取模型列表...';
+  const baseUrl = document.getElementById('cfgQaBaseUrl').value.trim() || document.getElementById('cfgLlmBaseUrl').value.trim();
+  const key = document.getElementById('cfgQaApiKey').value.trim() || document.getElementById('cfgLlmApiKey').value.trim();
+  const saveBody = { qa_base_url: baseUrl };
+  if (key && key !== '••••••••') saveBody.qa_api_key = key;
+  await apiPost('/api/config', saveBody);
+  const r = await apiGet('/api/admin/llm-models');
+  if (r.ok && r.models && r.models.length > 0) {
+    const sel = document.getElementById('cfgQaModel');
     const current = sel.value;
     sel.innerHTML = r.models.map(m => '<option value="' + escapeHtml(m) + '">' + escapeHtml(m) + '</option>').join('');
     if (Array.from(sel.options).some(o => o.value === current)) {
@@ -1265,12 +1466,12 @@ function updateCharStates(states) {
 
 function refreshDiffGrid() {
   const diffs = [
-    {id:'easy', name:'简单', range:'30-50字', multi:'×1.0'},
-    {id:'medium', name:'一般', range:'50-80字', multi:'×1.5'},
-    {id:'hard', name:'困难', range:'80-100字', multi:'×2.0'},
-    {id:'hell', name:'地狱', range:'100-120字', multi:'×3.0'},
-    {id:'void', name:'无人区', range:'120-150字', multi:'×5.0'},
-    {id:'auto', name:'自适应', range:'AI 动态调整', multi:'⚡'},
+    {id:'easy', name:'简单', range:'单步推理 直白零误导', multi:'×1.0'},
+    {id:'medium', name:'一般', range:'两步推理/一次反转', multi:'×1.5'},
+    {id:'hard', name:'困难', range:'三步+逻辑链/多层反转', multi:'×2.0'},
+    {id:'hell', name:'地狱', range:'嵌套谜局/多重反转', multi:'×3.0'},
+    {id:'void', name:'无人区', range:'抽象荒诞/打破常理', multi:'×5.0'},
+    {id:'auto', name:'自适应', range:'AI 自动判断难度', multi:'⚡'},
   ];
   document.getElementById('diffGrid').innerHTML = diffs.map(d =>
     '<div class="diff-btn '+ (selectedDiff===d.id?'active':'') +'" onclick="setDiff(\''+d.id+'\')"><div class="name">'+d.name+'</div><div class="range">'+d.range+'</div><div class="multi">'+d.multi+'</div></div>'
@@ -1282,6 +1483,13 @@ function setDiff(d) {
   refreshDiffGrid();
   document.getElementById('curDiff').textContent = d;
   apiPost('/api/admin/difficulty', {difficulty: d});
+}
+
+function setAiDiff(d) {
+  aiDiff = d;
+  document.querySelectorAll('#aiDiffSelector .ai-diff-btn').forEach(el => {
+    el.classList.toggle('active', el.dataset.diff === d);
+  });
 }
 
 function startGame() {
@@ -1463,17 +1671,69 @@ async function importSoups() {
   } catch(e) { alert('格式错误: ' + e.message); }
 }
 
+let aiAbortController = null;
+
 async function aiGenerate() {
-  document.getElementById('aiPendingList').innerHTML = '<div class="empty">AI生成中...</div>';
-  const data = await apiPost('/api/admin/ai-generate', {difficulty: selectedDiff, count: 5});
+  // 取消上一次请求（如果有）
+  if (aiAbortController) aiAbortController.abort();
+
+  aiAbortController = new AbortController();
+  const signal = aiAbortController.signal;
+
+  document.getElementById('aiPendingList').innerHTML =
+    '<div style="display:flex;align-items:center;gap:12px;padding:16px;background:rgba(59,130,246,0.08);border-radius:8px;border:1px solid rgba(59,130,246,0.2)">' +
+    '<span style="color:#60a5fa">⏳ AI生成中...</span>' +
+    '<button class="btn btn-sm" onclick="cancelAiGen()" style="margin-left:auto">取消</button></div>';
+  document.getElementById('aiBatchActions').style.display = 'none';
+  const cnt = parseInt(document.getElementById('aiCountSelect').value) || 5;
+  const data = await apiPost('/api/admin/ai-generate', {difficulty: aiDiff, count: cnt, direction: selectedDirection}, 1, signal);
+  aiAbortController = null;
+  if (!data || Object.keys(data).length === 0) {
+    // 可能被取消或异常
+    if (document.getElementById('aiPendingList').querySelector('button')?.textContent === '取消') {
+      document.getElementById('aiPendingList').innerHTML = '<div class="empty" style="color:#64748b">已取消</div>';
+    }
+    return;
+  }
+  if (data.error) {
+    document.getElementById('aiPendingList').innerHTML = '<div class="empty" style="color:#ef4444;border:1px solid rgba(239,68,68,0.3);background:rgba(239,68,68,0.08);padding:12px;border-radius:8px">❌ ' + escapeHtml(data.error) + '</div>';
+    return;
+  }
   pendingAiSoups = data.soups || [];
   renderAiPending();
 }
 
+function cancelAiGen() {
+  if (aiAbortController) {
+    aiAbortController.abort();
+    aiAbortController = null;
+  }
+  document.getElementById('aiPendingList').innerHTML = '<div class="empty" style="color:#64748b">⏹ 已取消</div>';
+}
+
+async function setDirection(dirId) {
+  selectedDirection = dirId;
+  document.querySelectorAll('#dirSelector .dir-chip').forEach(el => {
+    el.classList.toggle('active', el.dataset.dir === dirId);
+  });
+}
+
+async function loadAiDirections() {
+  const data = await apiGet('/api/admin/ai-directions');
+  if (!data.directions) return;
+  const container = document.getElementById('dirSelector');
+  container.innerHTML = data.directions.map(d =>
+    `<div class="dir-chip${d.id === selectedDirection ? ' active' : ''}" data-dir="${d.id}" title="${d.desc}" onclick="setDirection('${d.id}')">${d.name}</div>`
+  ).join('');
+}
+
+const DIFF_NAMES = {easy:'简单',medium:'一般',hard:'困难',hell:'地狱',void:'无人区',auto:'自适应'};
+const DIR_NAMES = {random:'综合随机',mystery:'悬疑推理',horror:'恐怖惊悚',daily:'日常推理','sci-fi':'科幻想象',ethics:'情感伦理','fairy-tale':'黑暗童话',urban:'都市传说',history:'历史秘闻','dark-humor':'黑色幽默',psychological:'心理迷宫'};
+
 function renderAiPending() {
   document.getElementById('aiPendingList').innerHTML = pendingAiSoups.map((s, i) =>
     '<div class="ai-soup-card">' +
-    '<div class="meta">[' + s.difficulty + '] 字数: ' + s.answer_length + '</div>' +
+    '<div class="meta">[' + (DIFF_NAMES[s.difficulty] || s.difficulty) + '] ' + (s.direction ? '｜' + (DIR_NAMES[s.direction] || s.direction) : '') + '</div>' +
     '<div class="surface">汤面：' + escapeHtml(s.surface) + '</div>' +
     '<div class="surface" style="color:#94a3b8;font-size:11px">汤底：' + escapeHtml(s.bottom) + '</div>' +
     '<div class="actions">' +
@@ -1538,6 +1798,7 @@ async function apiGet(path, retries = 5) {
       if (!connected) setConnStatus(true, '');
       return await r.json();
     } catch(e) {
+      if (e.name === 'AbortError') return {};
       if (i < retries - 1) {
         if (!connected && isStartupEndpoint(path)) setConnStatus(false, '连接后端 ' + path + ' (' + (i+1) + '/' + retries + ')');
         await new Promise(r => setTimeout(r, 1000));
@@ -1561,14 +1822,15 @@ async function apiGet(path, retries = 5) {
   return {};
 }
 
-async function apiPost(path, body, retries = 5) {
+async function apiPost(path, body, retries = 5, signal = null) {
   for (let i = 0; i < retries; i++) {
     try {
-      const r = await fetch(path, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+      const r = await fetch(path, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body), signal});
       if (!r.ok) { addLog('⚠️ API ' + path + ' 返回 ' + r.status); return {}; }
       if (!connected) setConnStatus(true, '');
       return await r.json();
     } catch(e) {
+      if (e.name === 'AbortError') return {};
       if (i < retries - 1) {
         if (!connected && isStartupEndpoint(path)) setConnStatus(false, '连接后端 ' + path + ' (' + (i+1) + '/' + retries + ')');
         await new Promise(r => setTimeout(r, 1000));
@@ -1625,6 +1887,7 @@ connect();
 refreshDiffGrid();
 loadAntiStallConfig();
 loadLlmConfig();
+loadQaConfig();
 loadGameConfig();
 loadTtsConfig();
 
@@ -1732,6 +1995,7 @@ function switchTab(el) {
     if (tabId==='game') { loadGameConfig(); loadTtsConfig(); }
     if (tabId==='slots') { loadSlots(); loadAntiStallConfig(); }
     if (tabId==='soup') loadSoupList();
+    if (tabId==='ai') loadAiDirections();
     if (tabId==='theme') loadThemes();
     if (tabId==='security') loadBannedWords();
     if (tabId==='cosyvoice') loadCosyvoiceTab();
@@ -1748,6 +2012,137 @@ function switchTab(el) {
 }
 // 自动 DOM 检查
 console.log('[Admin] DOM:', document.querySelectorAll('.tab').length + ' tabs, ' + document.querySelectorAll('.tab-content').length + ' contents');
+
+// ── 授权模块 ──
+let authTimer = null;
+
+function formatAuthTime(seconds) {
+  if (seconds == null) return '';
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  if (h > 0) return h + '小时' + m + '分';
+  return m + '分钟';
+}
+
+async function fetchAuthStatus() {
+  try {
+    const r = await apiGet('/api/auth/status');
+    const bar = document.getElementById('authBar');
+    const icon = document.getElementById('authIcon');
+    const text = document.getElementById('authText');
+    const actions = document.getElementById('authActions');
+
+    // 始终更新机器码
+    document.getElementById('authMachineId').textContent = r.machine_id || '--';
+
+    if (r.ok) {
+      if (r.is_permanent) {
+        bar.className = 'auth-bar auth-ok';
+        icon.textContent = '✓';
+        text.textContent = '已激活（永久授权）';
+      } else if (r.source === 'trial') {
+        bar.className = 'auth-bar auth-trial';
+        icon.textContent = '⏳';
+        const remain = formatAuthTime(r.remaining_seconds);
+        text.textContent = '试用中（剩余' + remain + '）';
+      } else {
+        bar.className = 'auth-bar auth-ok';
+        icon.textContent = '✓';
+        const days = r.remaining_days || 0;
+        if (days > 0) {
+          text.textContent = '已激活（剩余' + days + '天）';
+        } else {
+          text.textContent = '已激活';
+        }
+      }
+      // 已激活时显示"重新激活"入口，隐藏输入框
+      document.getElementById('authReactivate').style.display = '';
+      actions.style.display = 'none';
+    } else {
+      // 未激活时隐藏重新激活入口，显示输入框和按钮
+      document.getElementById('authReactivate').style.display = 'none';
+      bar.className = 'auth-bar auth-none';
+      icon.textContent = '✗';
+
+      if (r.reason === 'trial_expired') {
+        text.textContent = '试用已过期，请购买授权码激活';
+      } else if (r.reason === 'license_expired') {
+        text.textContent = '授权已过期，请续费激活';
+      } else if (r.reason === 'machine_mismatch') {
+        text.textContent = '授权绑定机器不匹配（机器ID: ' + r.machine_id + '）';
+      } else {
+        text.textContent = '未授权，请激活或开始试用';
+      }
+      actions.style.display = 'inline-flex';
+      if (!r.trial_available) {
+        // 隐藏试用按钮
+        actions.querySelectorAll('button')[1].style.display = 'none';
+      }
+    }
+  } catch (e) {
+    console.error('[Admin] 授权状态获取失败:', e);
+  }
+}
+
+function toggleAuthInput() {
+  const actions = document.getElementById('authActions');
+  const keyInput = document.getElementById('authKeyInput');
+  if (actions.style.display === 'none' || !actions.style.display) {
+    actions.style.display = 'inline-flex';
+    keyInput.focus();
+  } else {
+    actions.style.display = 'none';
+  }
+}
+
+function copyMachineId() {
+  const id = document.getElementById('authMachineId').textContent;
+  if (!id || id === '--') return;
+  navigator.clipboard.writeText(id).then(() => {
+    alert('机器码已复制: ' + id);
+  }).catch(() => {
+    // fallback
+    const ta = document.createElement('textarea');
+    ta.value = id;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    alert('机器码已复制: ' + id);
+  });
+}
+
+async function activateAuth() {
+  const key = document.getElementById('authKeyInput').value.trim();
+  if (!key) { alert('请输入授权码'); return; }
+  try {
+    const r = await apiPost('/api/auth/activate', { key: key });
+    if (r.ok) {
+      alert('✅ 授权激活成功！');
+      fetchAuthStatus();
+    } else {
+      alert('❌ 激活失败: ' + (r.reason || '未知错误'));
+    }
+  } catch (e) {
+    alert('❌ 激活请求失败: ' + e.message);
+  }
+}
+
+async function startTrial() {
+  if (!confirm('确定开始 5 小时免费试用？')) return;
+  try {
+    const r = await apiGet('/api/auth/start-trial');
+    if (r) {
+      fetchAuthStatus();
+    }
+  } catch (e) {
+    alert('❌ 试用启动失败: ' + e.message);
+  }
+}
+
+// 页面加载后检查授权状态
+fetchAuthStatus();
+authTimer = setInterval(fetchAuthStatus, 60000); // 每分钟刷新
 </script>
 </body>
 </html>"""

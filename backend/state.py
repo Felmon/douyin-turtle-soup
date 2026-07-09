@@ -208,9 +208,10 @@ async def llm_classify(text: str, answer: str, keywords: list[str]) -> str:
             model=LLM_MODEL,
             messages=[
                 {"role": "system", "content": "判断弹幕与答案的相关性。只回复：是、不是、是也不是"},
-                {"role": "user", "content": f"汤底: {answer}\\n关键词: {'、'.join(keywords)}\\n弹幕: {text}"},
+                {"role": "user", "content": f"汤底: {answer}\n关键词: {'、'.join(keywords)}\n弹幕: {text}"},
             ],
             max_tokens=10, temperature=0.1,
+            reasoning_effort="none",
         )
         r = resp.choices[0].message.content.strip()
         if "是也不是" in r: return "是也不是"

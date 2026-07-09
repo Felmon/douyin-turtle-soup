@@ -17,6 +17,8 @@
 import asyncio
 import json
 import os
+import random
+import re
 import socket
 import sys
 import threading
@@ -29,6 +31,19 @@ from urllib.parse import urlparse, unquote
 
 # ── 授权模块 ──
 import license as lic
+
+# ── 可写配置存储（替代硬编码 lambda） ──
+_game_config = {"roundTimeout": 600}
+_anti_stall_config = {"enabled": True, "interval": 180, "danmaku": 50}
+_banned_words: list = []
+_slot_overrides: dict = {}
+
+# ── 字符判断 ──
+FUNCTION_WORDS = frozenset("的了在是我有不人被这对于把和就这那而或与个以到去来着呢吧吗啊呀哦嗯")
+
+# ── WebSocket 广播 ──
+_ws_clients: set = set()
+_ws_loop = None
 
 # ── 配置 ──
 PORT = 3090
@@ -93,7 +108,10 @@ def _save_soups():
 
 # ── LLM 配置（持久化到本地 JSON）──
 _LLM_CONFIG_FILE = os.path.join(os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else _BASE, "llm_config.json")
-_llm_config = {"api_key": "", "base_url": "", "model": "deepseek-v4-flash", "reasoning": True}
+_llm_config = {
+    "api_key": "", "base_url": "", "model": "deepseek-v4-flash", "reasoning": True,
+    "qa_api_key": "", "qa_base_url": "", "qa_model": "mimo-v2.5",
+}
 try:
     if os.path.isfile(_LLM_CONFIG_FILE):
         with open(_LLM_CONFIG_FILE, encoding="utf-8") as f:
@@ -213,23 +231,25 @@ SLOT_DEFINITIONS = [
 
 
 def _build_slots():
-    """构建模拟槽位数据（含礼物信息）"""
+    """构建模拟槽位数据（含礼物信息，合并用户覆盖）"""
     result = []
     for sd in SLOT_DEFINITIONS:
         gift_name = sd["default_gift"]
         gift_info = GIFT_LIBRARY.get(gift_name, {})
-        result.append({
+        over = _slot_overrides.get(sd["id"], {})
+        slot = {
             "id": sd["id"],
             "group": sd["group"],
             "name": sd["name"],
             "desc": sd["desc"],
-            "gift_name": gift_name,
-            "gift_coins": gift_info.get("coins", 0),
-            "gift_icon": gift_info.get("icon", ""),
-            "enabled": True,
+            "gift_name": over.get("gift_name", gift_name),
+            "gift_coins": over.get("gift_coins", gift_info.get("coins", 0)),
+            "gift_icon": over.get("gift_icon", gift_info.get("icon", "")),
+            "enabled": over.get("enabled", True),
             "like_mode": False,
             "like_threshold": 500,
-        })
+        }
+        result.append(slot)
     return result
 
 
@@ -323,6 +343,20 @@ class MockState:
         self.gift_log = []
         self.char_states = []
         self.active_theme = "dark"
+        self.soup_text = ""
+        self.soup_answer = ""
+        self.soup_keywords = []
+        self.current_difficulty = ""
+
+    def reset(self):
+        self.phase = "idle"
+        self.start_time = 0
+        self.qa_history = []
+        self.char_states = []
+        self.soup_text = ""
+        self.soup_answer = ""
+        self.soup_keywords = []
+        self.current_difficulty = ""
 
     def to_dict(self):
         dur = int(time.time() - self.start_time) if self.start_time else 0
@@ -488,6 +522,39 @@ def _llm_ping():
         else:
             msg = f"连接失败: {err[:100]}"
         return {"ok": False, "model": _llm_config.get("model", ""), "error": err, "msg": msg}
+
+def _llm_classify(text, answer, keywords):
+    """游戏弹幕分类：是/不是/是也不是，始终用普通模式（无推理）。"""
+    api_key = _llm_config.get("qa_api_key") or _llm_config.get("api_key", "")
+    base_url = (_llm_config.get("qa_base_url") or _llm_config.get("base_url", "")).rstrip("/")
+    model_name = _llm_config.get("qa_model") or _llm_config.get("model", "")
+    if not api_key or not base_url or not model_name:
+        return "不是"
+    try:
+        payload = {
+            "model": model_name,
+            "messages": [
+                {"role": "system", "content": "判断弹幕与答案的相关性。只回复：是、不是、是也不是"},
+                {"role": "user", "content": f"汤底: {answer}\n关键词: {'、'.join(keywords)}\n弹幕: {text}"},
+            ],
+            "max_tokens": 10, "temperature": 0.1,
+            "reasoning_effort": "none",
+        }
+        req = urllib.request.Request(
+            f"{base_url}/chat/completions",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}",
+                     "User-Agent": "Mozilla/5.0"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        r = (data.get("choices") or [{}])[0].get("message", {}).get("content", "").strip()
+        if "是也不是" in r: return "是也不是"
+        if "是" in r: return "是"
+        return "不是"
+    except Exception:
+        return "不是"
 
 def _parse_ai_soups_text(text):
     """从 AI 返回的文本中解析出海龟汤数组。返回 (soups_list_or_None, error_str_or_None)。"""
@@ -676,9 +743,17 @@ class Handler(BaseHTTPRequestHandler):
         # API 路由
         routes = {
             "/api/health": lambda: {"status": "ok", "phase": _mock_state.phase, "connections": 0},
-            "/api/config": lambda: {"api_key_configured": bool(_llm_config.get("api_key")), "base_url": _llm_config.get("base_url", ""), "model": _llm_config.get("model", ""), "chat_model": _llm_config.get("chat_model", ""), "reasoning": _llm_config.get("reasoning", True)},
-            "/api/admin/anti-stall-config": lambda: {"enabled": True, "interval": 180, "danmaku": 50},
-            "/api/admin/game-config": lambda: {"roundTimeout": 600},
+            "/api/config": lambda: {
+                "api_key_configured": bool(_llm_config.get("api_key")),
+                "base_url": _llm_config.get("base_url", ""),
+                "model": _llm_config.get("model", ""),
+                "reasoning": _llm_config.get("reasoning", True),
+                "qa_api_key_configured": bool(_llm_config.get("qa_api_key")),
+                "qa_base_url": _llm_config.get("qa_base_url", ""),
+                "qa_model": _llm_config.get("qa_model", ""),
+            },
+            "/api/admin/anti-stall-config": lambda: dict(_anti_stall_config),
+            "/api/admin/game-config": lambda: dict(_game_config),
             "/api/admin/slots": lambda: {"slots": _build_slots()},
             "/api/admin/themes": lambda: {"themes": [
                 {"id": t["id"], "name": t["name"], "accent": t["accent"],
@@ -686,7 +761,7 @@ class Handler(BaseHTTPRequestHandler):
                 for t in BUILTIN_THEMES.values()
             ]},
             "/api/theme": lambda: {"theme_id": _mock_state.active_theme},
-            "/api/admin/banned-words": lambda: {"words": []},
+            "/api/admin/banned-words": lambda: {"words": _banned_words},
             "/api/triggers": lambda: {"triggers": []},
             "/api/admin/llm-models": lambda: _fetch_llm_models(),
             "/api/admin/metrics": lambda: _mock_state.to_dict(),
@@ -807,6 +882,13 @@ class Handler(BaseHTTPRequestHandler):
                     _llm_config["model"] = data["model"]; changed = True
                 if "reasoning" in data:
                     _llm_config["reasoning"] = bool(data["reasoning"]); changed = True
+                # 问答模型配置
+                if data.get("qa_api_key"):
+                    _llm_config["qa_api_key"] = data["qa_api_key"]; changed = True
+                if data.get("qa_base_url"):
+                    _llm_config["qa_base_url"] = data["qa_base_url"]; changed = True
+                if data.get("qa_model"):
+                    _llm_config["qa_model"] = data["qa_model"]; changed = True
                 if changed:
                     _save_llm_config()
             except Exception:
@@ -816,6 +898,14 @@ class Handler(BaseHTTPRequestHandler):
         # ── LLM ping（测试连接）──
         if path == "/api/admin/llm-ping":
             return self._json(_llm_ping())
+        if path == "/api/admin/qa-ping":
+            try:
+                result = _llm_classify("测试", "测试答案", ["测试"])
+                return self._json({"ok": True, "model": _llm_config.get("qa_model", ""), "response": result,
+                                   "msg": f"✅ 问答模型 {_llm_config.get('qa_model', '')} 响应正常"})
+            except Exception as e:
+                return self._json({"ok": False, "model": _llm_config.get("qa_model", ""), "error": str(e)[:100],
+                                   "msg": "❌ 问答模型检测失败"})
 
         # ── AI 出题 ──
         if path == "/api/admin/ai-generate":
@@ -828,15 +918,154 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 return self._json({"soups": [], "error": "AI 生成请求解析失败"})
 
-        ok_responses = {
-            "/api/admin/config-reload", "/api/admin/anti-stall-config",
-            "/api/admin/game-config", "/api/admin/slots/assign",
-            "/api/admin/slots/toggle", "/api/admin/slots/like-config",
-            "/api/admin/difficulty", "/api/admin/force-reveal",
-            "/api/admin/reset", "/api/admin/banned-words",
-            "/api/game/start",
-        }
-        if path in ok_responses:
+        # ── 游戏弹幕分类 ──
+        if path == "/api/classify":
+            try:
+                data = json.loads(body)
+                text = data.get("text", "")
+                answer = data.get("answer", "")
+                keywords = data.get("keywords", [])
+                result = _llm_classify(text, answer, keywords)
+                return self._json({"text": text, "answerType": result, "layer": "llm"})
+            except Exception:
+                return self._json({"text": "", "answerType": "不是", "layer": "error"})
+
+        # ── 游戏控制端点（实际修改状态） ──
+        if path == "/api/game/start":
+            try:
+                data = json.loads(body)
+                difficulty = data.get("difficulty", _mock_state.current_difficulty) or "medium"
+                soup_id = data.get("soup_id", "")
+
+                # 选汤
+                if soup_id:
+                    pool = [s for s in SOUPS_DATA if s.get("id") == soup_id]
+                elif difficulty in ("easy", "medium", "hard", "hell", "void"):
+                    pool = [s for s in SOUPS_DATA if s.get("difficulty") == difficulty]
+                else:
+                    pool = SOUPS_DATA
+                if not pool:
+                    pool = SOUPS_DATA
+                soup = random.choice(pool) if pool else None
+                if not soup:
+                    return self._json({"ok": False, "error": "题库为空"})
+
+                _mock_state.phase = "reading"
+                _mock_state.start_time = time.time()
+                _mock_state.round_total += 1
+                _mock_state.current_difficulty = difficulty
+                _mock_state.soup_text = soup.get("surface", "")
+                _mock_state.soup_answer = soup.get("bottom", "")
+                _mock_state.soup_keywords = soup.get("keywords", [])
+                bottom = soup.get("bottom", "")
+                _mock_state.char_states = [
+                    {"char": ch, "revealed": False,
+                     "isContent": bool(re.match(r"[一-龥]", ch)) and ch not in FUNCTION_WORDS}
+                    for ch in bottom
+                ]
+
+                asyncio.run_coroutine_threadsafe(
+                    _ws_broadcast({
+                        "type": "game_start", "phase": "reading",
+                        "surface": _mock_state.soup_text,
+                        "keywords": _mock_state.soup_keywords,
+                        "charStates": _mock_state.char_states,
+                        "difficulty": difficulty,
+                        "remaining": 600, "roundTimeout": 600,
+                    }),
+                    _ws_loop,
+                )
+                return self._json({"ok": True, "surface": _mock_state.soup_text, "difficulty": difficulty})
+            except Exception as e:
+                return self._json({"ok": False, "error": str(e)[:100]})
+
+        if path == "/api/admin/reset":
+            _mock_state.reset()
+            asyncio.run_coroutine_threadsafe(_ws_broadcast({"type": "game_end"}), _ws_loop)
+            return self._json({"ok": True})
+
+        if path == "/api/admin/force-reveal":
+            _mock_state.phase = "complete"
+            for cs in _mock_state.char_states:
+                cs["revealed"] = True
+            asyncio.run_coroutine_threadsafe(
+                _ws_broadcast({"type": "reveal_update", "charStates": _mock_state.char_states}),
+                _ws_loop,
+            )
+            asyncio.run_coroutine_threadsafe(_ws_broadcast({"type": "game_end"}), _ws_loop)
+            return self._json({"ok": True})
+
+        if path == "/api/admin/difficulty":
+            try:
+                _mock_state.current_difficulty = json.loads(body).get("difficulty", "medium")
+            except Exception:
+                pass
+            return self._json({"ok": True})
+
+        if path == "/api/admin/anti-stall-config":
+            try:
+                d = json.loads(body)
+                _anti_stall_config["enabled"] = d.get("enabled", True)
+                _anti_stall_config["interval"] = int(d.get("interval", 180))
+                _anti_stall_config["danmaku"] = int(d.get("danmaku", 50))
+            except Exception:
+                pass
+            return self._json({"ok": True})
+
+        if path == "/api/admin/game-config":
+            try:
+                _game_config["roundTimeout"] = int(json.loads(body).get("roundTimeout", 600))
+            except Exception:
+                pass
+            return self._json({"ok": True})
+
+        if path == "/api/admin/banned-words":
+            try:
+                words = json.loads(body).get("words", [])
+                _banned_words.clear()
+                _banned_words.extend(words)
+            except Exception:
+                pass
+            return self._json({"ok": True})
+
+        if path == "/api/admin/config-reload":
+            return self._json({"ok": True, "msg": "独立模式无需重载"})
+
+        # ── 槽位操作 ──
+        if path == "/api/admin/slots/assign":
+            try:
+                d = json.loads(body)
+                sid = str(d.get("slot_id", ""))
+                _slot_overrides[sid] = {
+                    "gift_name": d.get("gift_name", ""),
+                    "gift_coins": d.get("gift_coins", 0),
+                    "gift_icon": d.get("gift_icon", ""),
+                }
+                asyncio.run_coroutine_threadsafe(_ws_broadcast({"type": "slots_updated"}), _ws_loop)
+            except Exception:
+                pass
+            return self._json({"ok": True})
+
+        if path == "/api/admin/slots/toggle":
+            try:
+                d = json.loads(body)
+                sid = str(d.get("slot_id", ""))
+                _slot_overrides.setdefault(sid, {})["enabled"] = d.get("enabled", True)
+                asyncio.run_coroutine_threadsafe(_ws_broadcast({"type": "slots_updated"}), _ws_loop)
+            except Exception:
+                pass
+            return self._json({"ok": True})
+
+        if path == "/api/admin/slots/like-config":
+            try:
+                d = json.loads(body)
+                sid = str(d.get("slot_id", ""))
+                over = _slot_overrides.setdefault(sid, {})
+                over["like_mode"] = d.get("like_mode", False)
+                over["like_threshold"] = d.get("like_threshold", 0)
+                asyncio.run_coroutine_threadsafe(_ws_broadcast({"type": "slots_updated"}), _ws_loop)
+            except Exception:
+                pass
             return self._json({"ok": True})
 
         # ── TTS 配置持久化 ──
@@ -923,8 +1152,24 @@ class Handler(BaseHTTPRequestHandler):
 
 
 # ── WebSocket Handler ──
+async def _ws_broadcast(msg: dict):
+    """向所有连接的 WS 客户端广播消息"""
+    if not _ws_clients:
+        return
+    text = json.dumps(msg, ensure_ascii=False)
+    dead = set()
+    for ws in _ws_clients:
+        try:
+            await ws.send(text)
+        except Exception:
+            dead.add(ws)
+    _ws_clients -= dead
+
+
 async def _ws_serve(host, port):
     """启动 WebSocket 服务器 —— 处理心跳和基本状态推送"""
+    global _ws_loop
+    _ws_loop = asyncio.get_event_loop()
     try:
         import websockets
     except ImportError:
@@ -932,6 +1177,7 @@ async def _ws_serve(host, port):
         return
 
     async def handler(websocket):
+        _ws_clients.add(websocket)
         try:
             await websocket.send(json.dumps({"type": "connected", "standalone": True, "phase": _mock_state.phase}))
             async for message in websocket:
@@ -940,19 +1186,12 @@ async def _ws_serve(host, port):
                     msg_type = data.get("type", "")
                     if msg_type == "ping":
                         await websocket.send(json.dumps({"type": "pong"}))
-                    elif msg_type == "start_round":
-                        _mock_state.phase = "playing"
-                        _mock_state.start_time = time.time()
-                        await websocket.send(json.dumps({
-                            "type": "game_start", "phase": "reading",
-                            "soupText": "（独立模式 — 无游戏后端）",
-                            "soupAnswer": "", "charStates": [],
-                            "maxLike": 500, "roundTimeout": 600,
-                        }))
                 except json.JSONDecodeError:
                     pass
         except Exception:
             pass
+        finally:
+            _ws_clients.discard(websocket)
 
     async def serve():
         async with websockets.serve(handler, host, port, ping_interval=30):

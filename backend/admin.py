@@ -1482,7 +1482,9 @@ function setDiff(d) {
   selectedDiff = d;
   refreshDiffGrid();
   document.getElementById('curDiff').textContent = d;
-  apiPost('/api/admin/difficulty', {difficulty: d});
+  apiPost('/api/admin/difficulty', {difficulty: d}).catch(function(e) {
+    addLog('⚠️ 难度设置请求失败: ' + e.message);
+  });
 }
 
 function setAiDiff(d) {
@@ -1492,17 +1494,35 @@ function setAiDiff(d) {
   });
 }
 
-function startGame() {
-  apiPost('/api/game/start', {difficulty: selectedDiff});
+async function startGame() {
+  try {
+    const r = await apiPost('/api/game/start', {difficulty: selectedDiff});
+    if (r && r.ok) {
+      addLog('▶ 新局已开始（难度: ' + selectedDiff + '）');
+      document.getElementById('statusInfo').textContent = '● 游戏中';
+      if (r.surface) document.getElementById('curSurface').textContent = r.surface;
+    } else {
+      addLog('⚠️ 开局请求返回异常');
+    }
+  } catch(e) {
+    addLog('❌ 开局请求失败: ' + e.message);
+  }
   openOverlay();
 }
 function endGame() {
   if (!confirm('确认揭晓完整答案？')) return;
-  apiPost('/api/admin/force-reveal', {});
+  apiPost('/api/admin/force-reveal', {}).then(r => {
+    if (r && r.ok) addLog('🏁 已揭晓答案');
+    else addLog('⚠️ 揭晓请求异常');
+  }).catch(e => addLog('❌ 请求失败: ' + e.message));
+  document.getElementById('statusInfo').textContent = '● 已结束';
 }
 function resetGame() {
   if (!confirm('确认重置游戏？当前进度将清空。')) return;
-  apiPost('/api/admin/reset', {});
+  apiPost('/api/admin/reset', {}).then(r => {
+    if (r && r.ok) addLog('🔄 游戏已重置');
+  }).catch(e => addLog('❌ 重置请求失败: ' + e.message));
+  document.getElementById('statusInfo').textContent = '● 空闲中';
 }
 
 function openOverlay() {
@@ -1640,7 +1660,19 @@ async function loadSoupList() {
   ).join('') || '<div class="empty">暂无题目</div>';
 }
 
-async function useSoup(id) { apiPost('/api/game/start', {soup_id: id}); openOverlay(); }
+async function useSoup(id) {
+  try {
+    const r = await apiPost('/api/game/start', {soup_id: id});
+    if (r && r.ok) {
+      addLog('▶ 使用选题开新局');
+      document.getElementById('statusInfo').textContent = '● 游戏中';
+      if (r.surface) document.getElementById('curSurface').textContent = r.surface;
+    }
+  } catch(e) {
+    addLog('❌ 开局请求失败: ' + e.message);
+  }
+  openOverlay();
+}
 async function deleteSoup(id) { if (confirm('确认删除？')) { await apiPost('/api/admin/soups/delete', {id: id}); loadSoupList(); } }
 
 function showAddSoup() { document.getElementById('addSoupModal').style.display = 'flex'; }
@@ -1772,7 +1804,7 @@ async function rejectAllAi() {
 let connected = false;
 let connErrors = 0;
 let connFinalMsgShown = false;
-const startupEndpoints = ['/api/admin/game-config', '/api/admin/anti-stall-config', '/api/admin/slots', '/api/tts/config', '/api/config', '/api/game/start'];
+const startupEndpoints = ['/api/admin/game-config', '/api/admin/anti-stall-config', '/api/tts/config', '/api/config'];
 function setConnStatus(ok, msg) {
   const el = document.getElementById('connStatus');
   if (!el) return;

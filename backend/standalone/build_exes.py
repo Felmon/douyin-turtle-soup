@@ -14,6 +14,7 @@ _DIST = os.path.join(_HERE, "dist")
 
 SCRIPTS = [
     ("admin_console.py", "haiyutang-console.exe"),
+    ("standalone_app.py", "haiyutang-standalone.exe"),
 ]
 
 
@@ -65,7 +66,7 @@ def _force_rmtree(path: str, retries: int = 5, delay: float = 2.0):
 def build():
     if "--clean" in sys.argv and os.path.isdir(_DIST):
         _force_rmtree(_DIST)
-        for f in ["admin_console.spec"]:
+        for f in ["admin_console.spec", "standalone_app.spec"]:
             p = os.path.join(_HERE, f)
             if os.path.isfile(p):
                 os.remove(p)
@@ -89,18 +90,31 @@ def build():
             "--distpath", _DIST,
             "--workpath", os.path.join(_HERE, "build"),
             "--specpath", _HERE,
-            # 将 admin.py 和 overlay.py 作为数据文件打包，EXE 运行时从 _MEIPASS 读取
-            "--add-data", f"{os.path.join(_PARENT, 'admin.py')}{os.pathsep}.",
-            "--add-data", f"{os.path.join(_PARENT, 'overlay.py')}{os.pathsep}.",
+            # 将 admin.py, overlay.py, data_soups.py, theme_manager.py, gift_icons.json 打包为数据文件
+            # 注意：--specpath 下，PyInstaller 解析相对路径基于 spec 目录，所以用绝对路径
+            "--add-data", f"{os.path.abspath(os.path.join(_PARENT, 'admin.py'))}{os.pathsep}.",
+            "--add-data", f"{os.path.abspath(os.path.join(_PARENT, 'overlay.py'))}{os.pathsep}.",
+            "--add-data", f"{os.path.abspath(os.path.join(_PARENT, 'data_soups.py'))}{os.pathsep}.",
+            "--add-data", f"{os.path.abspath(os.path.join(_PARENT, 'theme_manager.py'))}{os.pathsep}.",
+            "--add-data", f"{os.path.abspath(os.path.join(_PARENT, '..', 'gift_icons.json'))}{os.pathsep}.",
             # PyWebView 动态导入 + 平台 COM 组件
             "--hidden-import", "webview",
             "--hidden-import", "webview.platforms.win32",
             "--hidden-import", "webview.platforms.winforms",
+            "--hidden-import", "websockets",
             "--hidden-import", "bottle",
             "--hidden-import", "cryptography",
-            "--noconfirm",
-            script_path,
+            "--hidden-import", "sqlite3",  # theme_manager.py exec 需要
+            "--hidden-import", "tkinter",  # auth_window.py 授权窗口
+            "--hidden-import", "edge_tts",  # TTS 语音合成
+            "--hidden-import", "certifi",  # edge-tts 依赖
         ]
+
+        # 独立版隐藏控制台窗口
+        if script == "standalone_app.py":
+            cmd.append("--windowed")
+
+        cmd.extend(["--noconfirm", script_path])
 
         subprocess.check_call(cmd, cwd=_HERE)
 
@@ -123,9 +137,16 @@ def build():
         size_mb = os.path.getsize(expected) / (1024 * 1024) if os.path.isfile(expected) else 0
         print(f"  [OK] {out_name}  ({size_mb:.1f} MB)")
 
+    # ── 打包完成后同步 soups_cache.json 到 dist/ ──
+    _soup_src = os.path.join(_HERE, "soups_cache.json")
+    if os.path.isfile(_soup_src):
+        shutil.copy2(_soup_src, os.path.join(_DIST, "soups_cache.json"))
+        print(f"\n  [OK] soups_cache.json 已同步到 dist/ ({(os.path.getsize(_soup_src) / 1024):.0f} KB)")
+
     print(f"\n{'='*50}")
     print(f"  Build complete! Output: {_DIST}")
     print(f"  - Console EXE")
+    print(f"  - Standalone EXE (combined admin + overlay)")
     print(f"{'='*50}")
 
 

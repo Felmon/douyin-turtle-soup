@@ -26,8 +26,11 @@ import time
 import traceback
 import urllib.request
 import urllib.error
+import uuid
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, unquote
+
+
 
 # ── 授权模块 ──
 import license as lic
@@ -38,8 +41,252 @@ _anti_stall_config = {"enabled": True, "interval": 180, "danmaku": 50}
 _banned_words: list = []
 _slot_overrides: dict = {}
 
+# ── 防卡死 / 计时器 / 自动下一局 状态 ──
+_anti_last_reveal = 0.0
+_danmaku_since_reveal = 0
+_anti_triggers = 0
+_auto_start_pending = False
+AUTO_START_DELAY = 10
+ANTI_STALL_DECAY = 0.8
+_background_tasks: set = set()
+
 # ── 字符判断 ──
 FUNCTION_WORDS = frozenset("的了在是我有不人被这对于把和就这那而或与个以到去来着呢吧吗啊呀哦嗯")
+
+
+# ── 揭示辅助函数 ──
+
+def _is_content_word(ch: str) -> bool:
+    return bool(re.match(r"[一-龥]", ch)) and ch not in FUNCTION_WORDS
+
+def _get_unrevealed(states: list) -> list:
+    return [s for s in states if s["isContent"] and not s["revealed"]]
+
+def _bcast(msg: dict):
+    """同步方法：向 WS 广播消息。"""
+    asyncio.run_coroutine_threadsafe(_ws_broadcast(msg), _ws_loop)
+
+def _reveal_char(states: list, char: str) -> list:
+    return [{**s, "revealed": True} if s["char"] == char else s for s in states]
+
+def _reveal_random_char() -> bool:
+    """揭示一个随机未揭示的内容字。返回是否揭示了。"""
+    global _anti_last_reveal
+    u = _get_unrevealed(_mock_state.char_states)
+    if not u:
+        return False
+    target = random.choice(u)["char"]
+    _mock_state.char_states = _reveal_char(_mock_state.char_states, target)
+    _anti_last_reveal = time.time()
+    _bcast({"type": "reveal_update", "charStates": _mock_state.char_states, "newChars": [target]})
+    return True
+
+def _reveal_sentence() -> bool:
+    """揭示完整一句（按标点分句）。返回是否揭示了。"""
+    answer = _mock_state.soup_answer
+    clauses = re.split(r"(?<=[，。！？、；：])", answer)
+    idx = 0
+    for clause in clauses:
+        if not clause.strip():
+            idx += len(clause)
+            continue
+        start, end = idx, idx + len(clause)
+        for i in range(start, end):
+            if i < len(_mock_state.char_states) and _mock_state.char_states[i]["isContent"] and not _mock_state.char_states[i]["revealed"]:
+                chars = set()
+                for j in range(start, end):
+                    if j < len(_mock_state.char_states) and _is_content_word(_mock_state.char_states[j]["char"]):
+                        _mock_state.char_states = _reveal_char(_mock_state.char_states, _mock_state.char_states[j]["char"])
+                        chars.add(_mock_state.char_states[j]["char"])
+                _bcast({"type": "reveal_update", "charStates": _mock_state.char_states, "newChars": list(chars)})
+                return True
+        idx = end
+    return False
+
+def _reveal_30p() -> bool:
+    """揭示 30% 的未揭示内容字。返回是否揭示了。"""
+    u = _get_unrevealed(_mock_state.char_states)
+    if not u:
+        return False
+    target_count = max(1, int(len(u) * 0.3))
+    targets = random.sample(u, min(target_count, len(u)))
+    chars = []
+    for s in targets:
+        _mock_state.char_states = _reveal_char(_mock_state.char_states, s["char"])
+        chars.append(s["char"])
+    _bcast({"type": "reveal_update", "charStates": _mock_state.char_states, "newChars": chars})
+    return True
+
+def _check_game_complete():
+    """若所有字已揭示，结束游戏。"""
+    r, t, _ = 0, 0, 0
+    c = [s for s in _mock_state.char_states if s["isContent"]]
+    r = sum(1 for s in c if s["revealed"])
+    t = len(c)
+    if r == t and t > 0 and _mock_state.phase != "complete":
+        _mock_state.phase = "complete"
+        _bcast({"type": "game_end", "winner": "系统", "charStates": _mock_state.char_states})
+
+
+# ── 后台 asyncio 任务 ──
+
+async def _timer_loop():
+    """每秒广播剩余时间，超时强制揭示。"""
+    while True:
+        await asyncio.sleep(1)
+        try:
+            if _mock_state.phase in ("idle", "complete", "lobby"):
+                if _mock_state.phase == "complete" and not _auto_start_pending:
+                    _auto_start_pending = True
+                    asyncio.create_task(_auto_start_after_delay())
+                continue
+            elapsed = time.time() - _mock_state.start_time
+            remaining = max(0, _game_config.get("roundTimeout", 600) - int(elapsed))
+            _mock_state.remaining = remaining
+            await _ws_broadcast({"type": "timer", "remaining": remaining, "elapsed": int(elapsed)})
+            if remaining <= 0:
+                await _ws_broadcast({"type": "timer", "remaining": 0, "elapsed": int(elapsed)})
+                for s in _mock_state.char_states:
+                    if s["isContent"] and not s["revealed"]:
+                        s["revealed"] = True
+                _mock_state.phase = "complete"
+                await _ws_broadcast({"type": "reveal_update", "charStates": _mock_state.char_states, "auto": True})
+                await _ws_broadcast({"type": "game_end", "winner": "系统", "charStates": _mock_state.char_states})
+        except Exception as e:
+            print(f"[Timer] Error: {e}")
+
+async def _anti_stall_loop():
+    """每 30s 检查防卡死条件，自动揭示。"""
+    while True:
+        await asyncio.sleep(30)
+        try:
+            if not _mock_state.soup_answer or _mock_state.phase in ("idle", "complete", "lobby"):
+                continue
+            if not _anti_stall_config.get("enabled", True):
+                continue
+            now = time.time()
+            decay = ANTI_STALL_DECAY ** _anti_triggers
+            time_cond = (now - _anti_last_reveal) >= (_anti_stall_config.get("interval", 180) * decay)
+            danmaku_cond = _danmaku_since_reveal >= (_anti_stall_config.get("danmaku", 50) * decay)
+            if time_cond or danmaku_cond:
+                u = _get_unrevealed(_mock_state.char_states)
+                if not u:
+                    continue
+                # 优先揭示高频字：按频率选择（这里用随机作为简化版）
+                _anti_triggers += 1
+                _reveal_random_char()
+                _danmaku_since_reveal = 0
+                _anti_last_reveal = time.time()
+                _check_game_complete()
+        except Exception as e:
+            print(f"[AntiStall] Error: {e}")
+
+async def _auto_start_after_delay():
+    """等待后自动开始下一局。"""
+    await asyncio.sleep(AUTO_START_DELAY)
+    try:
+        if _mock_state.phase == "complete":
+            print("[AutoStart] 自动开始下一局")
+            _do_game_start(difficulty=_mock_state.current_difficulty or "medium")
+    except Exception as e:
+        print(f"[AutoStart] Error: {e}")
+    finally:
+        _auto_start_pending = False
+
+
+# ── 游戏启动（可被 HTTP + 自动下一局复用） ──
+
+def _do_game_start(difficulty: str = "medium", soup_id: str = ""):
+    """选汤、初始化状态、广播 game_start。"""
+    global _anti_last_reveal, _danmaku_since_reveal, _anti_triggers
+    if not soup_id:
+        if difficulty in ("easy", "medium", "hard", "hell", "void"):
+            pool = [s for s in SOUPS_DATA if s.get("difficulty") == difficulty]
+        else:
+            pool = SOUPS_DATA
+        if not pool:
+            pool = SOUPS_DATA
+    else:
+        pool = [s for s in SOUPS_DATA if s.get("id") == soup_id]
+        if not pool:
+            pool = SOUPS_DATA
+    soup = random.choice(pool) if pool else None
+    if not soup:
+        print("[Game] 题库为空，无法开始")
+        return
+
+    _mock_state.phase = "reading"
+    _mock_state.start_time = time.time()
+    _mock_state.round_total += 1
+    _mock_state.current_difficulty = difficulty
+    _mock_state.soup_text = soup.get("surface", "")
+    _mock_state.soup_answer = soup.get("bottom", "")
+    _mock_state.soup_keywords = soup.get("keywords", [])
+    bottom = soup.get("bottom", "")
+    _mock_state.char_states = [
+        {"char": ch, "revealed": False,
+         "isContent": bool(re.match(r"[一-龥]", ch)) and ch not in FUNCTION_WORDS}
+        for ch in bottom
+    ]
+    # 重置防卡死计数器
+    _anti_last_reveal = time.time()
+    _danmaku_since_reveal = 0
+    _anti_triggers = 0
+
+    asyncio.run_coroutine_threadsafe(
+        _ws_broadcast({
+            "type": "game_start", "phase": "reading",
+            "surface": _mock_state.soup_text,
+            "keywords": _mock_state.soup_keywords,
+            "charStates": _mock_state.char_states,
+            "difficulty": difficulty,
+            "remaining": _game_config.get("roundTimeout", 600),
+            "roundTimeout": _game_config.get("roundTimeout", 600),
+        }),
+        _ws_loop,
+    )
+    print(f"[Game] 开始: {soup.get('title', '')} ({difficulty})")
+
+
+# ── WS 弹幕处理 ──
+
+async def _handle_danmaku(data: dict):
+    """处理弹幕消息：碰词揭示 + LLM 分类 + 结果广播。"""
+    global _danmaku_since_reveal, _anti_last_reveal
+    user = data.get("user", "观众")
+    content = data.get("content", "").strip()
+    if not content or _mock_state.phase not in ("reading",):
+        return
+
+    # 1. 碰词揭示：遍历弹幕每个字，检查是否匹配未揭示 content 字
+    new_chars = []
+    for ch in content:
+        for s in _mock_state.char_states:
+            if s["char"] == ch and s["isContent"] and not s["revealed"]:
+                s["revealed"] = True
+                new_chars.append(ch)
+                break
+
+    if new_chars:
+        _danmaku_since_reveal = 0
+        _anti_last_reveal = time.time()
+        await _ws_broadcast({
+            "type": "reveal_update",
+            "charStates": _mock_state.char_states,
+            "newChars": new_chars,
+        })
+        _check_game_complete()
+
+    # 2. LLM 分类（在线程中执行，避免阻塞事件循环）
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(None, _llm_classify, content, _mock_state.soup_answer, _mock_state.soup_keywords)
+    await _ws_broadcast({
+        "type": "classification",
+        "user": user, "text": content, "result": result,
+    })
+
+    # 3. 更新弹幕计数器（用于 anti-stall 判断）
+    _danmaku_since_reveal += 1
 
 # ── WebSocket 广播 ──
 _ws_clients: set = set()
@@ -56,13 +303,59 @@ if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
 else:
     _BASE = os.path.dirname(os.path.abspath(__file__))
 _PARENT = os.path.dirname(_BASE)  # backend/（仅开发模式）
+# 确保能 import 同级的 tts_engine 等模块
+if _PARENT not in sys.path:
+    sys.path.insert(0, _PARENT)
+
+# ── TTS 音频目录 ──
+_TTS_DIR = os.path.join(os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else _BASE, "tts_audio")
+os.makedirs(_TTS_DIR, exist_ok=True)
+
+def _parse_multipart(body: bytes, content_type: str) -> dict:
+    """简易 multipart/form-data 解析器 — 返回 {field_name: value|{filename,content,content_type}}"""
+    import re
+    m = re.search(r'boundary=([^;\s]+)', content_type)
+    if not m:
+        return {}
+    boundary = m.group(1).strip('"').encode()
+    parts = body.split(b'--' + boundary)
+    result = {}
+    for part in parts:
+        part = part.strip(b'\r\n ')
+        if part in (b'', b'--'):
+            continue
+        header_end = part.find(b'\r\n\r\n')
+        if header_end == -1:
+            continue
+        hdr = part[:header_end].decode('utf-8', errors='replace')
+        data = part[header_end + 4:]
+        if data.endswith(b'\r\n'):
+            data = data[:-2]
+        nm = re.search(r'name="([^"]*)"', hdr)
+        name = nm.group(1) if nm else ''
+        fm = re.search(r'filename="([^"]*)"', hdr)
+        if fm:
+            ct = re.search(r'Content-Type:\s*(\S+)', hdr)
+            result[name] = {
+                "filename": fm.group(1),
+                "content": data,
+                "content_type": ct.group(1) if ct else 'application/octet-stream',
+            }
+        else:
+            result[name] = data.decode('utf-8', errors='replace')
+    return result
+
 
 def _resolve_src(filename: str) -> str:
-    """尝试 _BASE（EXE）→ _PARENT（开发）解析数据文件路径"""
+    """尝试 _BASE（EXE 内）→ _PARENT（开发）→ 同级目录 解析数据文件路径"""
     p = os.path.join(_BASE, filename)
     if os.path.isfile(p):
         return p
-    return os.path.join(_PARENT, filename)
+    p2 = os.path.join(_PARENT, filename)
+    if os.path.isfile(p2):
+        return p2
+    # EXE 打包时文件在 _BASE，回退到同目录
+    return os.path.join(_BASE, filename)
 
 ADMIN_SRC = _resolve_src("admin.py")
 OVERLAY_SRC = _resolve_src("overlay.py")
@@ -82,7 +375,7 @@ OVERLAY_HTML_RAW = _exec_py_var(OVERLAY_SRC, "OVERLAY_HTML")
 SOUPS_DATA = []
 SOUPS_CACHE = os.path.join(os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else _BASE, "soups_cache.json")
 try:
-    SOUPS_SRC = os.path.join(_BASE, "data_soups.py")
+    SOUPS_SRC = _resolve_src("data_soups.py")
     if os.path.isfile(SOUPS_SRC):
         SOUPS_DATA = _exec_py_var(SOUPS_SRC, "SOUPS")
         print(f"  已加载 {len(SOUPS_DATA)} 道题库")
@@ -197,7 +490,17 @@ _DIFFICULTY_CONSTRAINTS = {
 
 # ── 加载礼物库 ──
 GIFT_LIBRARY = {}  # {gift_name: {coins, icon}}
-GIFT_JSON_SRC = os.path.join(_BASE, "gift_icons.json")
+GIFT_JSON_CANDIDATES = [
+    os.path.join(_BASE, "gift_icons.json"),  # EXE 打包内部
+    os.path.join(_PARENT, "gift_icons.json"), # backend/
+    os.path.join(os.path.dirname(_PARENT), "gift_icons.json"),  # 项目根目录
+    "C:/Users/27871/OneDrive/Desktop/CCcat猜词大挑战/overlay/gift_icons.json",
+]
+GIFT_JSON_SRC = GIFT_JSON_CANDIDATES[0]
+for _p in GIFT_JSON_CANDIDATES:
+    if os.path.isfile(_p):
+        GIFT_JSON_SRC = _p
+        break
 if os.path.isfile(GIFT_JSON_SRC):
     try:
         with open(GIFT_JSON_SRC, "r", encoding="utf-8") as f:
@@ -254,20 +557,13 @@ def _build_slots():
 
 
 def _search_gifts(query: str) -> list:
-    """搜索礼物库"""
+    """搜索礼物库，空查询返回价值最低的50个"""
     q = query.lower().strip()
-    if not q:
-        return []
-    results = []
-    for name, info in GIFT_LIBRARY.items():
-        if q in name.lower():
-            results.append({
-                "name": name,
-                "coins": info.get("coins", 0),
-                "icon": info.get("icon", ""),
-            })
-    results.sort(key=lambda x: x["coins"])
-    return results
+    items = list(GIFT_LIBRARY.items())
+    if q:
+        items = [(k, v) for k, v in items if q in k.lower()]
+    items.sort(key=lambda x: x[1].get("coins", 0))
+    return [{"name": k, "coins": v.get("coins", 0), "icon": v.get("icon", "")} for k, v in items[:50]]
 
 
 def inject_html(html: str, server_url: str, ws_url: str) -> str:
@@ -277,6 +573,7 @@ def inject_html(html: str, server_url: str, ws_url: str) -> str:
         f"window.SERVER_URL={json.dumps(server_url)};"
         f"window.WS_URL={json.dumps(ws_url)};"
         "window.__STANDALONE__=true;"
+        "window.__STANDALONE_TTS__=true;"
         "(function(){"
         "var _f=window.fetch;"
         "window.fetch=function(u,o){"
@@ -347,6 +644,7 @@ class MockState:
         self.soup_answer = ""
         self.soup_keywords = []
         self.current_difficulty = ""
+        self.remaining = 0
 
     def reset(self):
         self.phase = "idle"
@@ -357,6 +655,7 @@ class MockState:
         self.soup_answer = ""
         self.soup_keywords = []
         self.current_difficulty = ""
+        self.remaining = 0
 
     def to_dict(self):
         dur = int(time.time() - self.start_time) if self.start_time else 0
@@ -391,7 +690,73 @@ _tts_config = {
 def _build_tts_config():
     base = dict(_tts_config)
     base["engines"] = {"edge": {"available": True}, "cosyvoice": _get_cosyvoice_engine()}
+    # 从真实 CosyVoice 引擎加载音色列表（覆盖可能为空的缓存）
+    try:
+        import tts_engine
+        speakers = tts_engine.list_cosyvoice_speakers()
+        if speakers:
+            base["cosyvoice_speakers"] = speakers
+    except Exception:
+        pass
     return base
+
+
+# ── TTS 音频生成 ──
+
+_tts_rate_str_cache: str = ""
+
+def _tts_rate_str() -> str:
+    r = _tts_config.get("rate", 1.0)
+    if r >= 1:
+        return f"+{int((r-1)*100)}%"
+    return f"-{int((1-r)*100)}%"
+
+async def _generate_tts_async(text: str) -> tuple:
+    """根据引擎配置合成语音，返回 (filepath, url)。失败返回 (None, None)。
+    CosyVoice → .wav, Edge TTS → .mp3。"""
+    engine = _tts_config.get("engine", "edge")
+
+    # ── CosyVoice ──
+    if engine == "cosyvoice":
+        try:
+            import tts_engine
+        except ImportError:
+            print("[TTS] cosyvoice 引擎未安装，回退到 Edge TTS")
+        else:
+            spk_id = _tts_config.get("cosyvoice_spk", "default")
+            try:
+                loop = asyncio.get_running_loop()
+                sr, wav_bytes = await loop.run_in_executor(
+                    None, lambda: tts_engine.cosyvoice_generate(text, spk_id)
+                )
+            except Exception:
+                sr, wav_bytes = None, None
+            if wav_bytes:
+                filename = f"tts_{int(time.time())}_{hash(text) & 0xFFFF}.wav"
+                filepath = os.path.join(_TTS_DIR, filename)
+                with open(filepath, "wb") as f:
+                    f.write(wav_bytes)
+                print(f"[TTS] CosyVoice({spk_id}) -> {filename}")
+                return filepath, f"/audio/{filename}"
+            print("[TTS] CosyVoice 合成失败，回退到 Edge TTS")
+
+    # ── Edge TTS ──
+    try:
+        import edge_tts
+    except ImportError:
+        print("[TTS] edge-tts 未安装，跳过语音合成")
+        return None, None
+    voice = _tts_config.get("voice", "zh-CN-XiaoxiaoNeural")
+    rate = _tts_rate_str()
+    filename = f"tts_{int(time.time())}_{hash(text) & 0xFFFF}.mp3"
+    filepath = os.path.join(_TTS_DIR, filename)
+    try:
+        communicate = edge_tts.Communicate(text, voice, rate=rate)
+        await communicate.save(filepath)
+        return filepath, f"/audio/{filename}"
+    except Exception as e:
+        print(f"[TTS] 合成失败: {e}")
+        return None, None
 
 # ── CosyVoice 模拟部署状态 ──
 _cv_deploy = {
@@ -534,11 +899,10 @@ def _llm_classify(text, answer, keywords):
         payload = {
             "model": model_name,
             "messages": [
-                {"role": "system", "content": "判断弹幕与答案的相关性。只回复：是、不是、是也不是"},
+                {"role": "system", "content": "严格分类弹幕是否猜中汤底答案。只回复：是、不是、是也不是。规则：弹幕直接说出答案中的具体人物/物品/事件→是；弹幕提及同类但不匹配的内容（如其他水果）或完全无关→不是；弹幕相关但不准确→是也不是。注意：苹果和荔枝都是水果但不匹配，应回答不是。今天天气真好完全无关，应回答不是。"},
                 {"role": "user", "content": f"汤底: {answer}\n关键词: {'、'.join(keywords)}\n弹幕: {text}"},
             ],
-            "max_tokens": 10, "temperature": 0.1,
-            "reasoning_effort": "none",
+            "max_tokens": 500, "temperature": 0.1,
         }
         req = urllib.request.Request(
             f"{base_url}/chat/completions",
@@ -548,10 +912,24 @@ def _llm_classify(text, answer, keywords):
             method="POST",
         )
         with urllib.request.urlopen(req, timeout=15) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-        r = (data.get("choices") or [{}])[0].get("message", {}).get("content", "").strip()
-        if "是也不是" in r: return "是也不是"
-        if "是" in r: return "是"
+            raw = resp.read()
+            try:
+                data = json.loads(raw.decode("utf-8"))
+            except json.JSONDecodeError:
+                data = json.loads(raw.decode("utf-8", errors="replace"))
+        r = (data.get("choices") or [{}])[0].get("message", {}).get("content") or ""
+        r = r.strip()
+        if r in ("是", "不是", "是也不是"):
+            return r
+        # reasoning 模型 content 可能为空，从 reasoning_content 末尾提取标签
+        rc = (data.get("choices") or [{}])[0].get("message", {}).get("reasoning_content", "") or ""
+        rc = rc.strip()
+        if rc:
+            # 只检查末尾 100 字符，优先匹配长标签
+            tail = rc[-100:]
+            if "是也不是" in tail: return "是也不是"
+            if "不是" in tail: return "不是"
+            if "是" in tail: return "是"
         return "不是"
     except Exception:
         return "不是"
@@ -740,6 +1118,22 @@ class Handler(BaseHTTPRequestHandler):
             overlay_html = _apply_theme(OVERLAY_HTML_RAW, _mock_state.active_theme)
             return self._html(overlay_html)
 
+        # TTS 音频文件服务
+        if path.startswith("/audio/"):
+            filename = os.path.basename(path[len("/audio/"):])
+            filepath = os.path.join(_TTS_DIR, filename)
+            if os.path.isfile(filepath):
+                file_size = os.path.getsize(filepath)
+                self.send_response(200)
+                self.send_header("Content-Type", "audio/mpeg")
+                self.send_header("Content-Length", str(file_size))
+                self.send_header("Cache-Control", "no-cache")
+                self.end_headers()
+                with open(filepath, "rb") as f:
+                    self.wfile.write(f.read())
+                return
+            return self._json({"error": "not found"}, status=404)
+
         # API 路由
         routes = {
             "/api/health": lambda: {"status": "ok", "phase": _mock_state.phase, "connections": 0},
@@ -801,6 +1195,70 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         path = self._parse_path()
         raw = self._read_body()
+
+        # ── CosyVoice 说话人注册（multipart，需在 JSON 解码前处理）──
+        if path == "/api/tts/cosyvoice-speaker":
+            ct = self.headers.get("Content-Type", "")
+            if "multipart/form-data" not in ct:
+                return self._json({"ok": False, "error": "需要 multipart 上传"})
+            parts = _parse_multipart(raw, ct)
+            fdata = parts.get("file", {})
+            if not fdata.get("content"):
+                return self._json({"ok": False, "error": "未找到上传文件"})
+            spk_name = parts.get("name", "").strip() if isinstance(parts.get("name"), str) else ""
+            if not spk_name:
+                fn = fdata.get("filename", "")
+                spk_name = os.path.splitext(os.path.basename(fn))[0] if fn else ""
+            if not spk_name:
+                spk_name = f"upload_{uuid.uuid4().hex[:8]}"
+            # 优先保存到 CosyVoiceV7/asset（开发模式），否则保存到 tts_audio/cosyvoice/
+            cv_asset = os.path.join(_PARENT, "CosyVoiceV7", "asset")
+            if not os.path.isdir(cv_asset):
+                cv_asset = os.path.join(_TTS_DIR, "cosyvoice")
+            os.makedirs(cv_asset, exist_ok=True)
+            fname = f"zero_shot_prompt_{spk_name}.wav"
+            dest = os.path.join(cv_asset, fname)
+            with open(dest, "wb") as f:
+                f.write(fdata["content"])
+            registered = False
+            try:
+                import tts_engine
+                registered = tts_engine.register_cosyvoice_speaker(spk_name, dest)
+            except Exception:
+                pass
+            # 更新 speaker 列表供下拉框使用
+            spkers = _tts_config.get("cosyvoice_speakers", {})
+            spkers[spk_name] = {"available": True, "name": spk_name}
+            _tts_config["cosyvoice_speakers"] = spkers
+            return self._json({"ok": True, "spk_id": spk_name, "name": spk_name, "registered": registered})
+
+        # ── CosyVoice 说话人删除 ──
+        if path == "/api/tts/cosyvoice-speaker/delete":
+            try:
+                body = raw.decode("utf-8")
+            except UnicodeDecodeError:
+                body = raw.decode("gbk", errors="replace")
+            try:
+                data = json.loads(body)
+                spk_id = data.get("spk_id", "")
+                if not spk_id:
+                    return self._json({"ok": False, "error": "缺少 spk_id"})
+                if spk_id == "default":
+                    return self._json({"ok": False, "error": "不能删除默认音色"})
+                # 尝试从引擎删除
+                try:
+                    import tts_engine
+                    tts_engine.remove_cosyvoice_speaker(spk_id)
+                except Exception:
+                    pass
+                # 总是从配置中移除
+                spkers = _tts_config.get("cosyvoice_speakers", {})
+                removed = spkers.pop(spk_id, None) is not None
+                _tts_config["cosyvoice_speakers"] = spkers
+                return self._json({"ok": True, "removed_from_config": removed})
+            except Exception as e:
+                return self._json({"ok": False, "error": str(e)[:100]})
+
         try:
             body = raw.decode("utf-8")
         except UnicodeDecodeError:
@@ -926,6 +1384,10 @@ class Handler(BaseHTTPRequestHandler):
                 answer = data.get("answer", "")
                 keywords = data.get("keywords", [])
                 result = _llm_classify(text, answer, keywords)
+                # 猜中则自动揭示一字
+                if result == "是" and _mock_state.phase in ("reading", "playing"):
+                    _reveal_random_char()
+                    _check_game_complete()
                 return self._json({"text": text, "answerType": result, "layer": "llm"})
             except Exception:
                 return self._json({"text": "", "answerType": "不是", "layer": "error"})
@@ -936,45 +1398,7 @@ class Handler(BaseHTTPRequestHandler):
                 data = json.loads(body)
                 difficulty = data.get("difficulty", _mock_state.current_difficulty) or "medium"
                 soup_id = data.get("soup_id", "")
-
-                # 选汤
-                if soup_id:
-                    pool = [s for s in SOUPS_DATA if s.get("id") == soup_id]
-                elif difficulty in ("easy", "medium", "hard", "hell", "void"):
-                    pool = [s for s in SOUPS_DATA if s.get("difficulty") == difficulty]
-                else:
-                    pool = SOUPS_DATA
-                if not pool:
-                    pool = SOUPS_DATA
-                soup = random.choice(pool) if pool else None
-                if not soup:
-                    return self._json({"ok": False, "error": "题库为空"})
-
-                _mock_state.phase = "reading"
-                _mock_state.start_time = time.time()
-                _mock_state.round_total += 1
-                _mock_state.current_difficulty = difficulty
-                _mock_state.soup_text = soup.get("surface", "")
-                _mock_state.soup_answer = soup.get("bottom", "")
-                _mock_state.soup_keywords = soup.get("keywords", [])
-                bottom = soup.get("bottom", "")
-                _mock_state.char_states = [
-                    {"char": ch, "revealed": False,
-                     "isContent": bool(re.match(r"[一-龥]", ch)) and ch not in FUNCTION_WORDS}
-                    for ch in bottom
-                ]
-
-                asyncio.run_coroutine_threadsafe(
-                    _ws_broadcast({
-                        "type": "game_start", "phase": "reading",
-                        "surface": _mock_state.soup_text,
-                        "keywords": _mock_state.soup_keywords,
-                        "charStates": _mock_state.char_states,
-                        "difficulty": difficulty,
-                        "remaining": 600, "roundTimeout": 600,
-                    }),
-                    _ws_loop,
-                )
+                _do_game_start(difficulty=difficulty, soup_id=soup_id)
                 return self._json({"ok": True, "surface": _mock_state.soup_text, "difficulty": difficulty})
             except Exception as e:
                 return self._json({"ok": False, "error": str(e)[:100]})
@@ -985,15 +1409,40 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"ok": True})
 
         if path == "/api/admin/force-reveal":
-            _mock_state.phase = "complete"
             for cs in _mock_state.char_states:
                 cs["revealed"] = True
-            asyncio.run_coroutine_threadsafe(
-                _ws_broadcast({"type": "reveal_update", "charStates": _mock_state.char_states}),
-                _ws_loop,
-            )
-            asyncio.run_coroutine_threadsafe(_ws_broadcast({"type": "game_end"}), _ws_loop)
+            _mock_state.phase = "complete"
+            _bcast({"type": "reveal_update", "charStates": _mock_state.char_states})
+            _bcast({"type": "game_end", "winner": "系统", "charStates": _mock_state.char_states})
             return self._json({"ok": True})
+
+        # ── 礼物效果触发 ──
+        if path == "/api/effect/trigger":
+            try:
+                d = json.loads(body)
+                slot_id = d.get("slot_id", "")
+                user = d.get("user", "系统")
+                ok = False
+                if slot_id == "effect_complete":
+                    for cs in _mock_state.char_states:
+                        if cs["isContent"] and not cs["revealed"]:
+                            cs["revealed"] = True
+                    _mock_state.phase = "complete"
+                    _bcast({"type": "reveal_update", "charStates": _mock_state.char_states})
+                    _bcast({"type": "game_end", "winner": user, "charStates": _mock_state.char_states})
+                    ok = True
+                elif slot_id == "effect_reveal1":
+                    ok = _reveal_random_char()
+                elif slot_id == "effect_reveal_sentence":
+                    ok = _reveal_sentence()
+                elif slot_id == "effect_reveal_30p":
+                    ok = _reveal_30p()
+                if ok:
+                    _bcast({"type": "gift_effect", "user": user, "slotId": slot_id, "giftName": d.get("gift_name", "")})
+                    _check_game_complete()
+                return self._json({"ok": ok})
+            except Exception:
+                return self._json({"ok": False})
 
         if path == "/api/admin/difficulty":
             try:
@@ -1090,6 +1539,36 @@ class Handler(BaseHTTPRequestHandler):
                 pass
             return self._json({"ok": True})
 
+        # ── TTS 语音合成（实际调用 edge-tts） ──
+        if path == "/api/tts/synthesize":
+            try:
+                data = json.loads(body)
+                text = data.get("text", "")
+                if not text:
+                    return self._json({"ok": False, "error": "text 为空"})
+                future = asyncio.run_coroutine_threadsafe(
+                    _generate_tts_async(text), _ws_loop
+                )
+                filepath, url = future.result(timeout=60)
+                if filepath and os.path.isfile(filepath):
+                    # 返回音频数据
+                    ext = os.path.splitext(filepath)[1].lower()
+                    file_size = os.path.getsize(filepath)
+                    self.send_response(200)
+                    self.send_header("Content-Type", "audio/wav" if ext == ".wav" else "audio/mpeg")
+                    self.send_header("Content-Length", str(file_size))
+                    self.send_header("X-TTS-Rate", str(_tts_config.get("rate", 1.0)))
+                    self.send_header("Cache-Control", "no-cache")
+                    self.end_headers()
+                    with open(filepath, "rb") as f:
+                        self.wfile.write(f.read())
+                    return
+                return self._json({"ok": False, "error": "TTS 不可用（edge-tts 未安装？）"})
+            except ImportError:
+                return self._json({"ok": False, "error": "edge-tts 未安装"})
+            except Exception as e:
+                return self._json({"ok": False, "error": str(e)[:100]})
+
         special = {
             "/api/admin/ai-directions": {"directions": [
                 {"id":"random","name":"🎲 综合随机","desc":"AI自由发挥，不限定方向"},
@@ -1107,7 +1586,6 @@ class Handler(BaseHTTPRequestHandler):
             "/api/admin/ai-approve-all": {"ok": True},
             "/api/admin/tts/cosyvoice": {"ok": False, "error": "独立模式无 TTS"},
             "/api/tts/cosyvoice-uninstall": {"ok": True},
-            "/api/tts/synthesize": {"ok": True, "url": ""},
         }
         handler = special.get(path)
         if handler is not None:
@@ -1119,8 +1597,6 @@ class Handler(BaseHTTPRequestHandler):
             _cv_deploy["progress"] = _CV_STEPS[0]
             _cv_deploy["error"] = None
             return self._json({"ok": True})
-        if path == "/api/tts/cosyvoice-speaker":
-            return self._json({"ok": True, "speakers": {}})
         self._json({"error": "not found"}, status=404)
 
     # ── PUT（违禁词批量设置）──
@@ -1154,6 +1630,7 @@ class Handler(BaseHTTPRequestHandler):
 # ── WebSocket Handler ──
 async def _ws_broadcast(msg: dict):
     """向所有连接的 WS 客户端广播消息"""
+    global _ws_clients
     if not _ws_clients:
         return
     text = json.dumps(msg, ensure_ascii=False)
@@ -1167,7 +1644,7 @@ async def _ws_broadcast(msg: dict):
 
 
 async def _ws_serve(host, port):
-    """启动 WebSocket 服务器 —— 处理心跳和基本状态推送"""
+    """启动 WebSocket 服务器 —— 心跳、弹幕、游戏广播"""
     global _ws_loop
     _ws_loop = asyncio.get_event_loop()
     try:
@@ -1180,12 +1657,28 @@ async def _ws_serve(host, port):
         _ws_clients.add(websocket)
         try:
             await websocket.send(json.dumps({"type": "connected", "standalone": True, "phase": _mock_state.phase}))
+            # 如果游戏进行中，补发完整状态，让后连入的投屏端能同步
+            if _mock_state.phase not in ("idle", "lobby") and _mock_state.soup_text:
+                await websocket.send(json.dumps({
+                    "type": "state_sync",
+                    "room": {
+                        "phase": _mock_state.phase,
+                        "soup_text": _mock_state.soup_text,
+                        "char_states": _mock_state.char_states,
+                        "difficulty_name": _mock_state.current_difficulty or "",
+                    }
+                }))
             async for message in websocket:
                 try:
                     data = json.loads(message)
                     msg_type = data.get("type", "")
                     if msg_type == "ping":
                         await websocket.send(json.dumps({"type": "pong"}))
+                    elif msg_type == "danmaku":
+                        try:
+                            await _handle_danmaku(data.get("data", {}))
+                        except Exception as e:
+                            print(f"[WS] danmaku error: {e}")
                 except json.JSONDecodeError:
                     pass
         except Exception:
@@ -1195,6 +1688,13 @@ async def _ws_serve(host, port):
 
     async def serve():
         async with websockets.serve(handler, host, port, ping_interval=30):
+            # 后台任务：计时器 + 防卡死
+            t1 = asyncio.create_task(_timer_loop())
+            t2 = asyncio.create_task(_anti_stall_loop())
+            _background_tasks.add(t1)
+            _background_tasks.add(t2)
+            t1.add_done_callback(_background_tasks.discard)
+            t2.add_done_callback(_background_tasks.discard)
             await asyncio.Future()
 
     try:

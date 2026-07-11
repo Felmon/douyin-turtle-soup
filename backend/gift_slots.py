@@ -177,12 +177,10 @@ class GiftSlotManager:
     def search_gifts(self, query: str) -> list[dict]:
         """搜索礼物库（主播分配时用），按价值升序排列。"""
         q = query.lower().strip()
-        if not q:
-            items = sorted(GIFT_LIBRARY.items(), key=lambda x: x[1].get("coins", 0))
-            items = items[:50]
-        else:
-            items = [(k, v) for k, v in GIFT_LIBRARY.items() if q in k.lower()]
-            items = sorted(items, key=lambda x: x[1].get("coins", 0))[:50]
+        items = list(GIFT_LIBRARY.items())
+        if q:
+            items = [(k, v) for k, v in items if q in k.lower()]
+        items.sort(key=lambda x: x[1].get("coins", 0))
         return [{"name": k, "coins": v.get("coins", 0), "icon": v.get("icon", "")} for k, v in items]
 
 

@@ -557,13 +557,13 @@ def _build_slots():
 
 
 def _search_gifts(query: str) -> list:
-    """搜索礼物库，空查询返回价值最低的50个"""
+    """搜索礼物库，返回所有匹配的礼品，按价值升序排列"""
     q = query.lower().strip()
     items = list(GIFT_LIBRARY.items())
     if q:
         items = [(k, v) for k, v in items if q in k.lower()]
     items.sort(key=lambda x: x[1].get("coins", 0))
-    return [{"name": k, "coins": v.get("coins", 0), "icon": v.get("icon", "")} for k, v in items[:50]]
+    return [{"name": k, "coins": v.get("coins", 0), "icon": v.get("icon", "")} for k, v in items]
 
 
 def inject_html(html: str, server_url: str, ws_url: str) -> str:

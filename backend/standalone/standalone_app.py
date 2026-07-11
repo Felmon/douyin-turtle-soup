@@ -304,7 +304,10 @@ else:
     _BASE = os.path.dirname(os.path.abspath(__file__))
 _PARENT = os.path.dirname(_BASE)  # backend/（仅开发模式）
 # 确保能 import 同级的 tts_engine 等模块
-if _PARENT not in sys.path:
+if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+    if sys._MEIPASS not in sys.path:
+        sys.path.insert(0, sys._MEIPASS)
+elif _PARENT not in sys.path:
     sys.path.insert(0, _PARENT)
 
 # ── TTS 音频目录 ──
@@ -721,24 +724,25 @@ async def _generate_tts_async(text: str) -> tuple:
         try:
             import tts_engine
         except ImportError:
-            print("[TTS] cosyvoice 引擎未安装，回退到 Edge TTS")
-        else:
-            spk_id = _tts_config.get("cosyvoice_spk", "default")
-            try:
-                loop = asyncio.get_running_loop()
-                sr, wav_bytes = await loop.run_in_executor(
-                    None, lambda: tts_engine.cosyvoice_generate(text, spk_id)
-                )
-            except Exception:
-                sr, wav_bytes = None, None
-            if wav_bytes:
-                filename = f"tts_{int(time.time())}_{hash(text) & 0xFFFF}.wav"
-                filepath = os.path.join(_TTS_DIR, filename)
-                with open(filepath, "wb") as f:
-                    f.write(wav_bytes)
-                print(f"[TTS] CosyVoice({spk_id}) -> {filename}")
-                return filepath, f"/audio/{filename}"
-            print("[TTS] CosyVoice 合成失败，回退到 Edge TTS")
+            print("[TTS] cosyvoice 引擎未安装")
+            return None, None
+        spk_id = _tts_config.get("cosyvoice_spk", "default")
+        try:
+            loop = asyncio.get_running_loop()
+            sr, wav_bytes = await loop.run_in_executor(
+                None, lambda: tts_engine.cosyvoice_generate(text, spk_id)
+            )
+        except Exception:
+            sr, wav_bytes = None, None
+        if wav_bytes:
+            filename = f"tts_{int(time.time())}_{hash(text) & 0xFFFF}.wav"
+            filepath = os.path.join(_TTS_DIR, filename)
+            with open(filepath, "wb") as f:
+                f.write(wav_bytes)
+            print(f"[TTS] CosyVoice({spk_id}) -> {filename}")
+            return filepath, f"/audio/{filename}"
+        print("[TTS] CosyVoice 合成失败")
+        return None, None
 
     # ── Edge TTS ──
     try:
@@ -1563,7 +1567,9 @@ class Handler(BaseHTTPRequestHandler):
                     with open(filepath, "rb") as f:
                         self.wfile.write(f.read())
                     return
-                return self._json({"ok": False, "error": "TTS 不可用（edge-tts 未安装？）"})
+                engine = _tts_config.get("engine", "edge")
+                msg = "CosyVoice 合成失败，请检查部署状态" if engine == "cosyvoice" else "TTS 合成失败"
+                return self._json({"ok": False, "error": msg}, status=400)
             except ImportError:
                 return self._json({"ok": False, "error": "edge-tts 未安装"})
             except Exception as e:

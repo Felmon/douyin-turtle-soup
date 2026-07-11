@@ -96,6 +96,7 @@ def build():
             "--add-data", f"{os.path.abspath(os.path.join(_PARENT, 'overlay.py'))}{os.pathsep}.",
             "--add-data", f"{os.path.abspath(os.path.join(_PARENT, 'data_soups.py'))}{os.pathsep}.",
             "--add-data", f"{os.path.abspath(os.path.join(_PARENT, 'theme_manager.py'))}{os.pathsep}.",
+            "--add-data", f"{os.path.abspath(os.path.join(_PARENT, 'tts_engine.py'))}{os.pathsep}.",
             "--add-data", f"{os.path.abspath(os.path.join(_PARENT, '..', 'gift_icons.json'))}{os.pathsep}.",
             # PyWebView 动态导入 + 平台 COM 组件
             "--hidden-import", "webview",

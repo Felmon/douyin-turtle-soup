@@ -6,17 +6,10 @@ import time
 
 from fastapi import WebSocket, WebSocketDisconnect
 from state import (
-    room, manager, coins, db, slot_manager, spam_filter,
-    SOUPS, LLM_API_KEY, LLM_BASE_URL, LLM_MODEL,
-    ANTI_STALL_ENABLED, ANTI_STALL_INTERVAL, ANTI_STALL_DANMAKU,
-    ANTI_STALL_DECAY, AUTO_START_DELAY, ROUND_TIMEOUT,
-    MOCK_LEADERBOARD, GIFT_PRICES, GIFT_LIBRARY, GIFT_NAME_MAP,
-    SCORE_BY_DIFFICULTY, DIFFICULTY_MULTIPLIER,
-    DIFFICULTY_NAME_MAP, COMBO_TAUNTS, SLOT_TAUNTS,
-    CoinSystem, RevealEngine, GameRoom, ConnectionManager,
-    get_client, recreate_client,
-    llm_classify, llm_gift_solicit, add_score,
-    compute_adaptive_difficulty, auto_reveal_and_hint, reload_config,
+    room, manager, spam_filter,
+    SCORE_BY_DIFFICULTY,
+    RevealEngine,
+    llm_classify, add_score,
     handle_gift,
 )
 

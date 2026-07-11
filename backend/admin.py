@@ -267,6 +267,10 @@ canvas{max-width:100%}
             <span id="ttsRateVal" style="font-size:12px;color:#e2e8f0;font-weight:600;min-width:32px">1.0</span>
             <span id="ttsRateStatus" style="font-size:11px;color:#64748b"></span>
           </div>
+          <div style="margin-top:8px">
+            <button onclick="testEdgeTts()" style="background:rgba(34,197,94,0.15);border:1px solid rgba(34,197,94,0.3);color:#22c55e;padding:4px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600">▶ 试听</button>
+            <span id="edgeTtsTestStatus" style="font-size:11px;color:#64748b;margin-left:8px"></span>
+          </div>
         </div>
         <!-- CosyVoice3 状态指示（完整管理在专属标签页） -->
         <div class="section" style="margin-top:8px">
@@ -300,7 +304,7 @@ canvas{max-width:100%}
       </div>
     </div>
   </div>
-  </div>
+</div>
 
   <!-- 礼物槽位 -->
   <div class="tab-content" id="tab-slots">
@@ -521,17 +525,20 @@ canvas{max-width:100%}
             <option value="">加载中...</option>
           </select>
           <span id="cvVoiceStatus" style="font-size:11px;color:#64748b"></span>
+          <button id="cvDeleteSpeakerBtn" onclick="deleteCosyvoiceSpeaker()" style="display:none;background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.3);color:#ef4444;padding:4px 9px;border-radius:6px;cursor:pointer;font-size:13px;line-height:1" title="删除该音色">🗑</button>
         </div>
       </div>
       <div style="padding:12px;background:rgba(0,0,0,0.2);border-radius:8px;margin-bottom:12px">
         <div style="font-size:11px;color:#94a3b8;margin-bottom:6px">📤 上传音色样本（WAV，5-15秒单人语音）</div>
-        <input type="file" id="cvUploadInput" accept="audio/wav,audio/x-wav" style="display:none" onchange="uploadCosyvoiceSpeaker(this)">
-        <div style="display:flex;gap:8px;align-items:center">
-          <button class="btn btn-sm btn-forever-active" onclick="document.getElementById('cvUploadInput').click()" style="background:rgba(0,212,255,0.1);border:1px solid rgba(0,212,255,0.3);color:#00d4ff;cursor:pointer">📁 选择文件</button>
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
+          <input type="text" id="cvUploadName" placeholder="给音色起个名字，如：我的声音" style="flex:1;background:#1e293b;border:1px solid rgba(255,255,255,0.1);border-radius:6px;color:#e2e8f0;padding:6px 10px;font-size:12px;max-width:200px">
+          <input type="file" id="cvUploadInput" accept="audio/wav,audio/x-wav" style="display:none" onchange="selectCvUploadFile(this)">
+          <button class="btn btn-sm btn-forever-active" onclick="document.getElementById('cvUploadInput').click()" style="background:rgba(0,212,255,0.1);border:1px solid rgba(0,212,255,0.3);color:#00d4ff;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:12px">📁 选择文件</button>
+          <button id="cvUploadBtn" onclick="uploadCosyvoiceSpeaker()" style="display:none;background:rgba(34,197,94,0.15);border:1px solid rgba(34,197,94,0.3);color:#22c55e;padding:6px 14px;border-radius:8px;cursor:pointer;font-size:12px;font-weight:600">📤 上传</button>
           <span id="cvUploadStatus" style="font-size:11px;color:#64748b"></span>
         </div>
       </div>
-      <div style="padding:12px;background:rgba(0,0,0,0.2);border-radius:8px;margin-bottom:12px">
+      <div style="padding:12px;background:rgba(0,0,0,0.2);border-radius:8px">
         <div style="display:flex;align-items:center;gap:8px">
           <span style="font-size:11px;color:#94a3b8">🔊 语速</span>
           <input type="range" id="cvRateSlider" min="0.2" max="2.0" step="0.1" value="1.0" oninput="setCosyvoiceRate(this.value)" style="flex:1;max-width:200px;height:4px;border-radius:2px;background:rgba(100,116,139,0.3);-webkit-appearance:none;appearance:none;outline:none">
@@ -617,7 +624,6 @@ let selectedDiff = 'medium';
 let selectedDirection = 'random';
 let aiDiff = 'medium';
 let aiCount = 5;
-const DIRECTION_CSS = {'random':'','mystery':'','horror':'','daily':'','sci-fi':'','ethics':'','fairy-tale':'','urban':'','history':'','dark-humor':'','psychological':''};
 
 function connect() {
   if (ws) ws.close();
@@ -1029,7 +1035,7 @@ async function loadTtsConfig() {
     document.getElementById('ttsRateStatus').textContent = '';
     // CosyVoice3 音色
     if (d.cosyvoice_spk !== undefined) {
-      currentCosyvoiceVoice = d.cosyvoice_spk;
+      // currentCosyvoiceVoice implicitly set via API response
     }
     // 更新游戏标签页状态摘要
     const cv = d.engines?.cosyvoice;
@@ -1049,16 +1055,6 @@ async function loadTtsConfig() {
     const gStatus = document.getElementById('gCvStatus');
     if (gStatus) gStatus.textContent = '⚠ 加载失败';
   }
-}
-
-async function setTtsEngine(engine) {
-  try {
-    const r = await apiPost('/api/tts/config', {engine: engine});
-    if (r.ok) {
-      addLog('🔊 TTS引擎已切换到: ' + engine);
-    }
-    loadTtsConfig();
-  } catch(e) { addLog('❌ TTS引擎切换失败'); }
 }
 
 async function setTtsVoice(voice) {
@@ -1088,28 +1084,64 @@ async function setTtsRate(rate) {
   } catch(e) { document.getElementById('ttsRateStatus').textContent = '❌ 请求失败'; }
 }
 
+async function testEdgeTts() {
+  const statusEl = document.getElementById('edgeTtsTestStatus');
+  if (!statusEl) return;
+  statusEl.textContent = '⏳ 合成中...';
+  try {
+    const resp = await fetch('/api/tts/synthesize', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({text: '你好，我是 Edge TTS 语音引擎，现在为你朗读测试音频。'}),
+    });
+    if (!resp.ok) throw new Error('合成失败');
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const audio = new Audio(url);
+    audio.onended = () => { URL.revokeObjectURL(url); statusEl.textContent = ''; };
+    await audio.play();
+    statusEl.textContent = '✅ 播放中';
+    addLog('🔊 Edge TTS 试听播放完成');
+  } catch(e) {
+    statusEl.textContent = '❌ 试听失败';
+    addLog('❌ Edge TTS 试听失败: ' + e.message);
+  }
+}
+
 // ── CosyVoice3 标签页 ──
 
 async function loadCosyvoiceTab() {
   try {
     const d = await apiGet('/api/tts/config');
     renderCvTab(d);
-    // 同步更新游戏标签页状态
-    const gStatus = document.getElementById('gCvStatus');
+    updateCvDashboardStatus(d);
+    // 加载中则自动轮询（最多 10 次）
     const cv = d.engines?.cosyvoice;
-    if (gStatus) {
-      if (!cv || cv.status === 'not_found' || cv.status === 'deps_missing' || cv.status === 'model_missing') {
-        gStatus.innerHTML = '📦 未部署';
-      } else if (cv.status === 'ready') {
-        gStatus.innerHTML = d.engine === 'cosyvoice' ? '✅ 已启用' : '✅ 已就绪';
-      } else if (cv.status === 'error') {
-        gStatus.innerHTML = '⚠️ 异常';
-      } else {
-        gStatus.textContent = '⏳ 检测中...';
+    if (cv && cv.status === 'loading') {
+      window._cvPollCount = (window._cvPollCount || 0) + 1;
+      if (window._cvPollCount <= 10) {
+        setTimeout(() => loadCosyvoiceTab(), 3000);
       }
+    } else {
+      window._cvPollCount = 0;
     }
   } catch(e) {
     document.getElementById('cvStatusLabel').textContent = '⚠ 加载失败';
+  }
+}
+
+function updateCvDashboardStatus(d) {
+  const gStatus = document.getElementById('gCvStatus');
+  const cv = d.engines?.cosyvoice;
+  if (!gStatus) return;
+  if (!cv || cv.status === 'not_found' || cv.status === 'deps_missing' || cv.status === 'model_missing') {
+    gStatus.innerHTML = '📦 未部署';
+  } else if (cv.status === 'ready') {
+    gStatus.innerHTML = d.engine === 'cosyvoice' ? '✅ 已启用' : '✅ 已就绪';
+  } else if (cv.status === 'error') {
+    gStatus.innerHTML = '⚠️ 异常';
+  } else {
+    gStatus.textContent = '⏳ 检测中...';
   }
 }
 
@@ -1198,6 +1230,8 @@ function loadCvVoices(d) {
     if (id === d.cosyvoice_spk) opt.selected = true;
     sel.appendChild(opt);
   }
+  const delBtn = document.getElementById('cvDeleteSpeakerBtn');
+  if (delBtn) delBtn.style.display = (d.cosyvoice_spk && d.cosyvoice_spk !== 'default') ? 'inline-block' : 'none';
 }
 
 async function deployCosyvoice() {
@@ -1333,6 +1367,8 @@ async function setCosyvoiceVoice(spkId) {
     } else {
       status.textContent = '❌ 切换失败';
     }
+    const delBtn = document.getElementById('cvDeleteSpeakerBtn');
+    if (delBtn) delBtn.style.display = (spkId && spkId !== 'default') ? 'inline-block' : 'none';
     setTimeout(() => status.textContent = '', 3000);
   } catch(e) {
     document.getElementById('cvVoiceStatus').textContent = '❌ 请求失败';
@@ -1383,8 +1419,19 @@ async function testCosyvoiceTts() {
   }
 }
 
-async function uploadCosyvoiceSpeaker(input) {
-  const file = input?.files?.[0];
+let _cvUploadFile = null;
+
+function selectCvUploadFile(input) {
+  _cvUploadFile = input?.files?.[0] || null;
+  const btn = document.getElementById('cvUploadBtn');
+  const status = document.getElementById('cvUploadStatus');
+  if (btn) btn.style.display = _cvUploadFile ? 'inline-block' : 'none';
+  if (status && _cvUploadFile) status.textContent = '📄 ' + _cvUploadFile.name;
+}
+
+async function uploadCosyvoiceSpeaker() {
+  const file = _cvUploadFile;
+  const nameEl = document.getElementById('cvUploadName');
   const statusEl = document.getElementById('cvUploadStatus');
   if (!file) return;
   if (file.type !== 'audio/wav' && !file.name.endsWith('.wav')) {
@@ -1395,15 +1442,21 @@ async function uploadCosyvoiceSpeaker(input) {
     statusEl.textContent = '❌ 文件过大（最大 50MB）';
     return;
   }
+  const spkName = (nameEl ? nameEl.value.trim() : '') || file.name.replace(/\.\w+$/, '');
   statusEl.textContent = '⏳ 上传中...';
   try {
     const form = new FormData();
     form.append('file', file);
+    form.append('name', spkName);
     const r = await fetch('/api/tts/cosyvoice-speaker', { method: 'POST', body: form });
     const data = await r.json();
     if (data.ok) {
       statusEl.textContent = '✅ 音色已注册: ' + (data.name || data.spk_id);
-      addLog('🎤 CosyVoice3 新音色已上传: ' + data.name);
+      addLog('🎤 CosyVoice3 新音色已上传: ' + (data.name || data.spk_id));
+      if (nameEl) nameEl.value = '';
+      const btn = document.getElementById('cvUploadBtn');
+      if (btn) btn.style.display = 'none';
+      _cvUploadFile = null;
       loadCosyvoiceTab();
     } else {
       statusEl.textContent = '❌ ' + (data.error || '注册失败');
@@ -1412,8 +1465,32 @@ async function uploadCosyvoiceSpeaker(input) {
     statusEl.textContent = '❌ 上传失败: ' + e.message;
   }
   // 清空 input 以便重复选择同一文件
-  input.value = '';
+  const inp = document.getElementById('cvUploadInput');
+  if (inp) inp.value = '';
   setTimeout(() => statusEl.textContent = '', 5000);
+}
+
+async function deleteCosyvoiceSpeaker() {
+  const sel = document.getElementById('cvVoiceSelect');
+  if (!sel || !sel.value) return;
+  const spkId = sel.value;
+  if (spkId === 'default') {
+    document.getElementById('cvVoiceStatus').textContent = '⚠️ 不能删除默认音色';
+    setTimeout(() => document.getElementById('cvVoiceStatus').textContent = '', 3000);
+    return;
+  }
+  if (!confirm('确定要删除音色「' + (sel.options[sel.selectedIndex]?.text || spkId) + '」吗？')) return;
+  try {
+    const r = await apiPost('/api/tts/cosyvoice-speaker/delete', {spk_id: spkId});
+    if (r.ok) {
+      addLog('🗑 CosyVoice3 音色已删除: ' + spkId);
+      loadCosyvoiceTab();
+    } else {
+      document.getElementById('cvVoiceStatus').textContent = '❌ ' + (r.error || '删除失败');
+    }
+  } catch(e) {
+    document.getElementById('cvVoiceStatus').textContent = '❌ 删除失败';
+  }
 }
 
 async function fetchGpuInfo() {

@@ -144,13 +144,13 @@ body{color:var(--text);
 .reveal-stats{display:flex;gap:2.5vw;font-size:1.3vh;color:var(--text-dim)}
 .reveal-stats .val{color:var(--primary);font-weight:700;margin-left:0.4vw;font-size:1.5vh}
 
-.reveal-scroll{flex:1;overflow-y:hidden;padding:1.5vh 2.5vw 1vh;
-  display:flex;flex-wrap:wrap;align-content:flex-start;gap:0.5vw;
+.reveal-scroll{flex:1;overflow-y:hidden;padding:1.2vh 2vw 0.8vh;
+  display:flex;flex-wrap:wrap;align-content:flex-start;gap:0.4vw;
   justify-content:center;align-items:flex-start;
   position:relative;z-index:2;--cb-font-size:min(3.8vh,4.2vw);--cb-w:5.2vw;--cb-h:5.5vh}
 
 /* ── 字格 (核心视觉, 固定大方格) ── */
-.char-box{width:var(--cb-w);height:var(--cb-h);min-width:30px;min-height:34px;
+.char-box{width:var(--cb-w);height:var(--cb-h);
   display:flex;align-items:center;justify-content:center;overflow:hidden;
   font-size:var(--cb-font-size);font-weight:900;border-radius:8px;transition:all 0.4s;
   position:relative;font-family:'ZCOOL KuaiLe',serif}
@@ -459,6 +459,27 @@ body{color:var(--text);
 @keyframes fullscreen-flash{0%{opacity:0}15%{opacity:1}85%{opacity:1}100%{opacity:0}}
 @keyframes center-zoom{0%{transform:scale(0)}60%{transform:scale(1.2)}100%{transform:scale(1)}}
 
+/* ── 等待覆盖层 ── */
+.waiting-overlay{position:fixed;inset:0;z-index:100;display:flex;align-items:center;justify-content:center;
+  background:var(--bg-grad);flex-direction:column;gap:1.5vh}
+.waiting-content{text-align:center;display:flex;flex-direction:column;align-items:center;gap:1.2vh}
+.waiting-logo{font-size:10vh;animation:waiting-bounce 2s ease-in-out infinite}
+@keyframes waiting-bounce{0%,100%{transform:translateY(0)}50%{transform:translateY(-1.5vh)}}
+.waiting-title{font-size:4vh;font-weight:900;background:linear-gradient(90deg,var(--primary),var(--purple));
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.waiting-sub{font-size:2vh;color:var(--text-dim);letter-spacing:3px}
+.waiting-dots{display:flex;gap:1.2vw;margin-top:1vh}
+.waiting-dots span{width:1.2vh;height:1.2vh;border-radius:50%;background:var(--primary);
+  animation:waiting-dot 1.4s ease-in-out infinite}
+.waiting-dots span:nth-child(2){animation-delay:0.2s}
+.waiting-dots span:nth-child(3){animation-delay:0.4s}
+@keyframes waiting-dot{0%,80%,100%{opacity:0.2;transform:scale(0.6)}40%{opacity:1;transform:scale(1)}}
+/* 默认显示等待覆盖层，进入游戏后隐藏 */
+body.playing-mode .waiting-overlay{display:none !important}
+body:not(.playing-mode) .reveal-area,body:not(.playing-mode) .surface-area,
+body:not(.playing-mode) .bottom-row,body:not(.playing-mode) .bottom-area .danmaku-panel,
+body:not(.playing-mode) .answer-bubbles{display:none!important}
+
 /* ── 入场动画 ── */
 .fade-in{animation:fade-in 0.4s ease-out}
 @keyframes fade-in{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
@@ -519,6 +540,16 @@ body{color:var(--text);
 <body>
 
 <canvas id="particles"></canvas>
+
+<!-- 等待覆盖层 -->
+<div class="waiting-overlay" id="waitingOverlay">
+  <div class="waiting-content">
+    <div class="waiting-logo">🐢</div>
+    <div class="waiting-title">海龟汤</div>
+    <div class="waiting-sub">等待开播...</div>
+    <div class="waiting-dots"><span></span><span></span><span></span></div>
+  </div>
+</div>
 
 <div class="app" id="app">
   <!-- 顶栏 -->
@@ -689,7 +720,7 @@ function fitRevealChars() {
   const availW = container.clientWidth - padW;
   const availH = container.clientHeight - padH;
   const total = boxes.length;
-  let lo = 8, hi = 48, best = 8;
+  let lo = 4, hi = 48, best = 4;
   while (lo <= hi) {
     const mid = Math.floor((lo + hi) / 2);
     const bw = mid * 1.15 + 8;
@@ -762,6 +793,9 @@ function scheduleReconnect() {
 
 function handleMessage(msg) {
   switch(msg.type) {
+    case 'connected':
+      if (msg.phase) setPhase(msg.phase);
+      break;
     case 'state_sync':
       currentRoom = msg.room;
       if (msg.room) {
@@ -1128,6 +1162,8 @@ let ttsAudio = null;
 async function speakTTS(text, hideMs) {
   if (!text) return;
   if (ttsTimeout) clearTimeout(ttsTimeout);
+  // 独立版若无 TTS 引擎则跳过
+  if (window.__STANDALONE__ && !window.__STANDALONE_TTS__) { CONFIG.ttsEnabled = false; }
   // 显示字幕条
   const bar = document.getElementById('ttsBar');
   document.getElementById('ttsText').textContent = text;
@@ -1163,11 +1199,11 @@ async function speakTTS(text, hideMs) {
 // 阶段
 // ══════════════════════════════════════════
 function setPhase(phase) {
-  // 非游戏阶段隐藏排行榜
+  const isPlaying = !(phase === 'idle' || phase === 'lobby');
+  document.body.classList.toggle('playing-mode', isPlaying);
+  // 排行榜始终显示
   const infoPanel = document.querySelector('.info-panel');
-  if (infoPanel) {
-    infoPanel.style.display = (phase === 'lobby') ? 'none' : 'flex';
-  }
+  if (infoPanel) infoPanel.style.display = 'flex';
 }
 
 // ══════════════════════════════════════════
@@ -1284,8 +1320,6 @@ connect();
 fetchSlotConfig();
 fitRevealChars();
 fitSurfaceText();
-// 初始隐藏排行榜，等游戏开始时显示
-document.querySelector('.info-panel').style.display = 'none';
 refreshLeaderboard();
 setInterval(refreshLeaderboard, 10000);
 setInterval(() => { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({type: 'ping'})); }, 5000);

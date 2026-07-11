@@ -19,12 +19,15 @@ import json
 import os
 import random
 import re
+import shutil
 import socket
+import subprocess
 import sys
 import threading
 import time
 import traceback
 import urllib.request
+from pathlib import Path
 import urllib.error
 import uuid
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -38,7 +41,17 @@ import license as lic
 # ── 可写配置存储（替代硬编码 lambda） ──
 _game_config = {"roundTimeout": 600}
 _anti_stall_config = {"enabled": True, "interval": 180, "danmaku": 50}
-_banned_words: list = []
+_banned_words: list = [
+    "加微信", "QQ群", "加群", "私聊", "扫码", "二维码",
+    "进群", "拉群", "微信号", "手机号", "电话",
+    "代刷", "代练", "外挂", "辅助", "脚本", "刷屏器",
+    "赌博", "赌场", "博彩",
+    "色情", "黄片", "A片",
+    "政治", "领导人", "共产党", "习近平",
+    "卖号", "买号", "租号", "交易",
+    "广告", "推广", "招代理",
+    "骗子", "骗钱", "诈骗",
+]
 _slot_overrides: dict = {}
 
 # ── 防卡死 / 计时器 / 自动下一局 状态 ──
@@ -377,6 +390,7 @@ OVERLAY_HTML_RAW = _exec_py_var(OVERLAY_SRC, "OVERLAY_HTML")
 # ── 可选加载题库 ──
 SOUPS_DATA = []
 SOUPS_CACHE = os.path.join(os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else _BASE, "soups_cache.json")
+_BANNED_WORDS_FILE = os.path.join(os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else _BASE, "banned_words.json")
 try:
     SOUPS_SRC = _resolve_src("data_soups.py")
     if os.path.isfile(SOUPS_SRC):
@@ -398,9 +412,41 @@ except Exception:
 def _save_soups():
     try:
         with open(SOUPS_CACHE, "w", encoding="utf-8") as f:
-            json.dump(SOUPS_DATA, f, ensure_ascii=False)
+            json.dump(SOUPS_DATA, f,ensure_ascii=False)
     except Exception:
         pass
+
+# ── 屏蔽词持久化 ──
+def _load_banned_words():
+    global _banned_words
+    try:
+        if os.path.isfile(_BANNED_WORDS_FILE):
+            with open(_BANNED_WORDS_FILE, encoding="utf-8") as f:
+                data = json.load(f)
+            # 文件非空 → 加载用户保存的词；为空（旧版遗留）→ 保留默认值
+            if isinstance(data, list) and len(data) > 0:
+                _banned_words = data
+                print(f"  已加载 {len(_banned_words)} 条屏蔽词")
+            elif isinstance(data, list) and len(data) == 0:
+                # 旧版存了空列表，覆盖为默认值
+                _save_banned_words()
+                print(f"  屏蔽词文件为空，已重置为默认值 ({len(_banned_words)} 条)")
+        else:
+            # 首次运行，保存默认值到文件
+            _save_banned_words()
+            print(f"  已保存默认屏蔽词 ({len(_banned_words)} 条)")
+    except Exception:
+        pass
+
+def _save_banned_words():
+    try:
+        with open(_BANNED_WORDS_FILE, "w", encoding="utf-8") as f:
+            json.dump(_banned_words, f, ensure_ascii=False)
+    except Exception:
+        pass
+
+# 启动时加载屏蔽词
+_load_banned_words()
 
 # ── LLM 配置（持久化到本地 JSON）──
 _LLM_CONFIG_FILE = os.path.join(os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else _BASE, "llm_config.json")
@@ -692,15 +738,34 @@ _tts_config = {
 
 def _build_tts_config():
     base = dict(_tts_config)
-    base["engines"] = {"edge": {"available": True}, "cosyvoice": _get_cosyvoice_engine()}
-    # 从真实 CosyVoice 引擎加载音色列表（覆盖可能为空的缓存）
-    try:
-        import tts_engine
-        speakers = tts_engine.list_cosyvoice_speakers()
-        if speakers:
-            base["cosyvoice_speakers"] = speakers
-    except Exception:
-        pass
+    if _cosyvoice_preloaded:
+        # 优先使用预加载/部署缓存（含上次真实检测结果）
+        with _cosyvoice_preload_lock:
+            cached = dict(_cosyvoice_preload_cache)
+        if cached.get("status") and cached["status"] not in ("loading",):
+            base["engines"] = {"edge": {"available": True}, "cosyvoice": cached}
+            print(f"[TTS Config] 使用缓存 status={cached.get('status')}", flush=True)
+        else:
+            # 缓存不可用时实时检测
+            live = _get_cosyvoice_engine()
+            base["engines"] = {"edge": {"available": True}, "cosyvoice": live}
+            print(f"[TTS Config] 实时检测 status={live.get('status')}", flush=True)
+            # 异步回写缓存
+            with _cosyvoice_preload_lock:
+                _cosyvoice_preload_cache.clear()
+                _cosyvoice_preload_cache.update(live)
+        try:
+            import tts_engine
+            speakers = tts_engine.list_cosyvoice_speakers()
+            if speakers:
+                base["cosyvoice_speakers"] = speakers
+        except Exception:
+            pass
+    else:
+        # 后台加载中，返回缓存状态（不阻塞 HTTP）
+        with _cosyvoice_preload_lock:
+            base["engines"] = {"edge": {"available": True}, "cosyvoice": dict(_cosyvoice_preload_cache)}
+        base["cosyvoice_speakers"] = {}
     return base
 
 
@@ -762,42 +827,358 @@ async def _generate_tts_async(text: str) -> tuple:
         print(f"[TTS] 合成失败: {e}")
         return None, None
 
-# ── CosyVoice 模拟部署状态 ──
-_cv_deploy = {
-    "deploying": False, "progress": None, "error": None,
-    "_step": 0, "_max_step": 5,
-}
-_CV_STEPS = [
-    {"pct": 10, "step": "install_deps", "text": "安装 Python 依赖..."},
-    {"pct": 30, "step": "submodule",    "text": "初始化 Git 子模块..."},
-    {"pct": 60, "step": "download_model", "text": "下载模型文件中..."},
-    {"pct": 90, "step": "verify",       "text": "验证安装..."},
-    {"pct": 100,"step": "done",         "text": "✅ 部署完成！（独立模式模拟）"},
-]
+# ── CosyVoice 部署状态 ──
+_cv_deploy_lock = threading.Lock()
+_cv_deploy_progress: dict = {}  # {"step": ..., "pct": ..., "text": ...}
+
+# frozen EXE 中 pip 需要原始 Python 解释器
+if getattr(sys, "frozen", False):
+    _python_exe = getattr(sys, "_base_executable", None) or sys.executable
+else:
+    _python_exe = sys.executable
+
+# EXE 模式下 CosyVoice 本地存储路径（EXE 旁边的 CosyVoiceV7/）
+_cosyvoice_site = None   # pip install --target 目录
+_cosyvoice_local_dir = None  # EXE 旁边的 CosyVoiceV7 目录
+_cosyvoice_exe_inited = False
+
+
+def _init_cosyvoice_exe_paths():
+    """EXE 模式下初始化 CosyVoice 的存储路径。"""
+    global _cv_dir, _cosyvoice_site, _cosyvoice_local_dir, _cosyvoice_exe_inited
+    if _cosyvoice_exe_inited:
+        return
+    base = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else _BASE
+    _cosyvoice_local_dir = os.path.join(base, "CosyVoiceV7")
+    _cosyvoice_site = os.path.join(_cosyvoice_local_dir, ".cosyvoice_site")
+    os.makedirs(_cosyvoice_site, exist_ok=True)
+    if _cosyvoice_site not in sys.path:
+        sys.path.insert(0, _cosyvoice_site)
+    if _cosyvoice_local_dir not in sys.path:
+        sys.path.insert(0, _cosyvoice_local_dir)
+    _cv_dir = _cosyvoice_local_dir
+    _cosyvoice_exe_inited = True
+
+
+# 使用 tts_engine 定义的位置（backend/CosyVoiceV7/）
+_cv_dir = None  # 延迟初始化
 
 
 def _get_cosyvoice_engine():
-    """返回 cosyvoice engine 状态 — 根据部署进度变化。"""
-    if _cv_deploy["_step"] >= _cv_deploy["_max_step"]:
-        return {"status": "ready", "detail": "CosyVoice3 已就绪（独立模式模拟）"}
-    return {"status": "not_found", "detail": "模拟独立模式 — 可点击一键安装体验完整流程"}
+    """返回 cosyvoice engine 的真实状态。"""
+    try:
+        import tts_engine as te
+        if getattr(sys, "frozen", False):
+            _init_cosyvoice_exe_paths()
+            # 覆盖 tts_engine 中的路径为 EXE 旁边的目录
+            te.COSYVOICE_DIR = Path(_cosyvoice_local_dir)
+        result = te.cosyvoice_status()
+        print(f"[CosyVoice] _get_cosyvoice_engine -> {result.get('status')}: {result.get('detail', '')[:80]}", flush=True)
+        return result
+    except ImportError:
+        return {"status": "deps_missing", "detail": "tts_engine 不可用"}
+    except Exception as e:
+        print(f"[CosyVoice] _get_cosyvoice_engine 异常: {e}", flush=True)
+        return {"status": "error", "detail": str(e)[:100]}
 
 
 def _get_cv_deploy_status():
-    """返回 CosyVoice 部署状态（每查一次自动推进进度）。"""
-    if not _cv_deploy["deploying"]:
+    """返回 CosyVoice 部署实时状态。"""
+    with _cv_deploy_lock:
+        running = _cv_deploy_progress.get("step") in (None, "", "done", "error") and False
+        # 正在运行中的标志：没有 done/error 就有进度
+        step = _cv_deploy_progress.get("step", "")
+        if step and step not in ("done", "error"):
+            return {
+                "deploying": True,
+                "progress": dict(_cv_deploy_progress),
+                "error": None,
+            }
+        if step == "error":
+            return {
+                "deploying": False,
+                "progress": dict(_cv_deploy_progress),
+                "error": _cv_deploy_progress.get("text", ""),
+            }
         return {"deploying": False, "progress": None, "error": None}
-    step_idx = _cv_deploy["_step"]
-    if step_idx >= _cv_deploy["_max_step"]:
-        _cv_deploy["deploying"] = False
-        _cv_deploy["progress"] = None
-        return {"deploying": False, "progress": None, "error": None}
-    step = _CV_STEPS[step_idx]
-    _cv_deploy["_step"] += 1
-    result = {"deploying": True, "progress": step, "error": None}
-    if step["step"] == "done":
-        _cv_deploy["deploying"] = False
-    return result
+
+
+def _cosyvoice_model_files_complete(model_dir: str) -> bool:
+    """检查模型文件是否齐全。"""
+    required = ["llm.pt", "flow.pt", "hift.pt", "campplus.onnx", "speech_tokenizer_v3.onnx"]
+    for f in required:
+        if not os.path.isfile(os.path.join(model_dir, f)):
+            return False
+    # 检查 CosyVoice-BlankEN tokenizer 目录
+    tokenizer_dir = os.path.join(model_dir, "CosyVoice-BlankEN")
+    if not os.path.isdir(tokenizer_dir):
+        return False
+    for bf in ["model.safetensors", "config.json", "vocab.json", "tokenizer_config.json", "merges.txt"]:
+        if not os.path.isfile(os.path.join(tokenizer_dir, bf)):
+            return False
+    return True
+
+
+def _pip_install_cosyvoice_deps():
+    """安装缺失的 Python 依赖。"""
+    # 检查已安装的包
+    installed = set()
+    try:
+        r = subprocess.run(
+            [_python_exe, "-m", "pip", "list", "--format=freeze"],
+            capture_output=True, text=True, timeout=30,
+        )
+        for line in r.stdout.strip().splitlines():
+            pkg_name = line.split("==")[0].strip().lower()
+            if pkg_name:
+                installed.add(pkg_name)
+    except Exception:
+        pass
+
+    candidates = [
+        "torch>=2.0.0", "torchaudio>=2.0.0",
+        "soundfile", "librosa",
+        "hydra-core", "omegaconf", "einops",
+        "vector-quantize-pytorch", "tensorboard", "lightning",
+        "conformer", "diffusers", "modelscope",
+        "transformers", "onnx", "protobuf", "pyarrow", "wetext", "pyworld",
+        "huggingface_hub",
+        "openai-whisper", "inflect", "HyperPyYAML",
+        "matcha-tts",
+        "flow_matching", "torch-einops-utils",  # cosyvoice flow matching 需要的
+        "onnxruntime-gpu==1.18.0",  # 先尝试 GPU 版，失败再用 CPU 版
+    ]
+    to_install = []
+    for pkg in candidates:
+        base = pkg.split(">=")[0].split("==")[0].strip().lower()
+        if base not in installed:
+            to_install.append(pkg)
+
+    if not to_install:
+        return
+
+    # EXE 模式：用 --target 安装到 EXE 旁边的本地目录
+    extra_pip_args = []
+    if getattr(sys, "frozen", False):
+        _init_cosyvoice_exe_paths()
+        extra_pip_args = ["--target", _cosyvoice_site]
+
+    # 逐个安装（个别包如 matcha-tts 需要编译，用短超时 + 非致命）
+    total = len(to_install)
+    for idx, pkg in enumerate(to_install):
+        pct = 10 + int(30 * ((idx + 1) / total))
+        base_name = pkg.split(">=")[0].split("==")[0]
+        with _cv_deploy_lock:
+            _cv_deploy_progress.update({
+                "step": "install_deps", "pct": pct,
+                "text": f"安装依赖 ({idx+1}/{total}): {base_name}...",
+            })
+        timeout = 300 if base_name in ("matcha-tts", "onnxruntime-gpu") else 600
+        try:
+            subprocess.check_call(
+                [_python_exe, "-m", "pip", "install", "-i", "https://pypi.tuna.tsinghua.edu.cn/simple", pkg] + extra_pip_args,
+                timeout=timeout,
+            )
+        except subprocess.CalledProcessError:
+            # onnxruntime-gpu 失败时试 CPU 版
+            if base_name == "onnxruntime-gpu":
+                try:
+                    subprocess.check_call(
+                        [_python_exe, "-m", "pip", "install", "onnxruntime"] + extra_pip_args,
+                        timeout=600,
+                    )
+                except subprocess.CalledProcessError as ex:
+                    print(f"[CosyVoice Deploy] onnxruntime 安装也失败: {ex}")
+                    with _cv_deploy_lock:
+                        _cv_deploy_progress.update({
+                            "step": "install_deps", "pct": pct,
+                            "text": f"onnxruntime 安装失败（非致命）: {str(ex)[:80]}",
+                        })
+            else:
+                # 非致命依赖失败时打印警告并继续
+                print(f"[CosyVoice Deploy] 依赖 {base_name} 安装失败（跳过，非致命）")
+                with _cv_deploy_lock:
+                    _cv_deploy_progress.update({
+                        "step": "install_deps", "pct": pct,
+                        "text": f"{base_name} 安装跳过（非致命），继续...",
+                    })
+
+
+def _ensure_cosyvoice_repo():
+    """克隆 CosyVoice 仓库（如已存在则跳过）。"""
+    global _cv_dir
+    if getattr(sys, "frozen", False):
+        _init_cosyvoice_exe_paths()
+        _cv_dir = _cosyvoice_local_dir
+    else:
+        import tts_engine as te
+        _cv_dir = str(te.COSYVOICE_DIR)
+    if os.path.isdir(os.path.join(_cv_dir, "cosyvoice")):
+        with _cv_deploy_lock:
+            _cv_deploy_progress.update({
+                "step": "clone_repo", "pct": 50,
+                "text": "CosyVoice 仓库已存在",
+            })
+        return
+
+    urls = [
+        "https://gitclone.com/github.com/FunAudioLLM/CosyVoice.git",
+        "https://github.com/FunAudioLLM/CosyVoice.git",
+    ]
+    last_error = ""
+    for url in urls:
+        try:
+            subprocess.check_call(["git", "clone", "--depth", "1", url, _cv_dir], timeout=120)
+            # 克隆子模块 Matcha-TTS（失败不致命）
+            matcha_dir = os.path.join(_cv_dir, "third_party", "Matcha-TTS")
+            os.makedirs(matcha_dir, exist_ok=True)
+            try:
+                subprocess.check_call(
+                    ["git", "clone", "--depth", "1",
+                     "https://gitclone.com/github.com/shivammehta25/Matcha-TTS.git",
+                     str(matcha_dir)],
+                    timeout=60,
+                )
+            except Exception:
+                pass
+            with _cv_deploy_lock:
+                _cv_deploy_progress.update({
+                    "step": "clone_repo", "pct": 50,
+                    "text": "CosyVoice 仓库克隆成功",
+                })
+            return
+        except subprocess.CalledProcessError as e:
+            last_error = str(e)
+            continue
+    raise RuntimeError(f"克隆 CosyVoice 仓库失败: {last_error}")
+
+
+def _download_cosyvoice_model():
+    """下载 CosyVoice3 模型文件。"""
+    global _cv_dir
+    model_dir = os.path.join(_cv_dir, "pretrained_models", "Fun-CosyVoice3-0.5B")
+    if _cosyvoice_model_files_complete(model_dir):
+        with _cv_deploy_lock:
+            _cv_deploy_progress.update({
+                "step": "download_model", "pct": 85,
+                "text": "模型文件已存在",
+            })
+        return
+
+    os.makedirs(model_dir, exist_ok=True)
+    model_id = "FunAudioLLM/Fun-CosyVoice3-0.5B-2512"
+    with _cv_deploy_lock:
+        _cv_deploy_progress.update({
+            "step": "download_model", "pct": 60,
+            "text": f"从 Hugging Face 下载模型 ({model_id})...",
+        })
+    try:
+        # 在进程内导入 huggingface_hub（_cosyvoice_site 已在 sys.path 中）
+        os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
+        from huggingface_hub import snapshot_download
+        snapshot_download(
+            repo_id=model_id,
+            local_dir=model_dir,
+            local_dir_use_symlinks=False,
+            resume_download=True,
+        )
+    except Exception as e:
+        raise RuntimeError(f"模型下载失败: {e}")
+
+
+def _run_cosyvoice_deploy():
+    """在后端线程中执行完整部署流程。"""
+    try:
+        # EXE 模式：验证 Python 解释器可用
+        if getattr(sys, "frozen", False):
+            base_python = getattr(sys, "_base_executable", None)
+            if not base_python or not os.path.isfile(base_python):
+                raise RuntimeError("未检测到系统 Python 解释器，无法安装 CosyVoice 依赖。\n请确保已安装 Python 3.8+ 并在系统 PATH 中。")
+
+        # Step 1: 安装依赖
+        with _cv_deploy_lock:
+            _cv_deploy_progress.update({"step": "install_deps", "pct": 5, "text": "检查 Python 依赖..."})
+        _pip_install_cosyvoice_deps()
+        with _cv_deploy_lock:
+            _cv_deploy_progress.update({"step": "install_deps", "pct": 40, "text": "依赖安装完成"})
+
+        # Step 2: 克隆仓库
+        with _cv_deploy_lock:
+            _cv_deploy_progress.update({"step": "clone_repo", "pct": 45, "text": "克隆 CosyVoice 仓库..."})
+        _ensure_cosyvoice_repo()
+
+        # Step 3: 下载模型
+        with _cv_deploy_lock:
+            _cv_deploy_progress.update({"step": "download_model", "pct": 55, "text": "下载模型文件中..."})
+        _download_cosyvoice_model()
+
+        # Step 4: 验证
+        with _cv_deploy_lock:
+            _cv_deploy_progress.update({"step": "verify", "pct": 90, "text": "正在验证..."})
+        import tts_engine as te
+        if getattr(sys, "frozen", False):
+            _init_cosyvoice_exe_paths()
+            te.COSYVOICE_DIR = Path(_cosyvoice_local_dir)
+        te.reset_cosyvoice()
+        print(f"[CosyVoice Deploy] COSYVOICE_DIR={te.COSYVOICE_DIR}, exists={te.COSYVOICE_DIR.exists()}", flush=True)
+        status = te.cosyvoice_status()
+        print(f"[CosyVoice Deploy] 验证 status={status.get('status')}, detail={status.get('detail','')[:100]}", flush=True)
+        if status["status"] == "ready":
+            with _cv_deploy_lock:
+                _cv_deploy_progress.update({
+                    "step": "done", "pct": 100,
+                    "text": "部署成功！CosyVoice3 已就绪",
+                })
+            # 同步更新预加载缓存，防止后续 _get_cosyvoice_engine 返回旧状态
+            with _cosyvoice_preload_lock:
+                _cosyvoice_preload_cache.clear()
+                _cosyvoice_preload_cache.update(status)
+        else:
+            with _cv_deploy_lock:
+                _cv_deploy_progress.update({
+                    "step": "error", "pct": 0,
+                    "text": f"验证失败: {status.get('detail', '未知错误')}",
+                })
+    except Exception as e:
+        with _cv_deploy_lock:
+            _cv_deploy_progress.update({
+                "step": "error", "pct": 0,
+                "text": f"部署失败: {str(e)[:200]}",
+            })
+        traceback.print_exc()
+
+
+# ── CosyVoice 后台预加载 ──
+_cosyvoice_preloaded = False
+_cosyvoice_preload_lock = threading.Lock()
+_cosyvoice_preload_cache: dict = {"status": "loading", "detail": "引擎加载中..."}
+
+
+def _background_preload_cosyvoice():
+    """后台线程预加载 CosyVoice 引擎，避免阻塞 HTTP。"""
+    global _cosyvoice_preloaded
+    print("[CosyVoice] 后台预加载开始...", flush=True)
+    t0 = time.time()
+    try:
+        import tts_engine
+        if getattr(sys, "frozen", False):
+            _init_cosyvoice_exe_paths()
+            tts_engine.COSYVOICE_DIR = Path(_cosyvoice_local_dir)
+        print(f"[CosyVoice] tts_engine 导入完成 ({time.time()-t0:.1f}s)，开始 cosyvoice_status()...", flush=True)
+        t1 = time.time()
+        status = tts_engine.cosyvoice_status()
+        print(f"[CosyVoice] cosyvoice_status() 返回 ({time.time()-t1:.1f}s): {status.get('status')}", flush=True)
+        with _cosyvoice_preload_lock:
+            _cosyvoice_preload_cache.clear()
+            _cosyvoice_preload_cache.update(status)
+    except Exception as e:
+        print(f"[CosyVoice] 预加载异常: {e}", flush=True)
+        traceback.print_exc()
+        with _cosyvoice_preload_lock:
+            _cosyvoice_preload_cache.update({"status": "error", "detail": str(e)[:200]})
+    finally:
+        _cosyvoice_preloaded = True
+        print(f"[CosyVoice] 预加载完成，总耗时 {time.time()-t0:.1f}s", flush=True)
 
 
 # ── 题库筛选 ──
@@ -1474,9 +1855,18 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/admin/banned-words":
             try:
-                words = json.loads(body).get("words", [])
-                _banned_words.clear()
-                _banned_words.extend(words)
+                d = json.loads(body)
+                # admin.js 发 {word: "xxx"} 添加单个词
+                if "word" in d:
+                    w = d["word"].strip()
+                    if w and w not in _banned_words:
+                        _banned_words.append(w)
+                        _save_banned_words()
+                # 兼容批处理 {words: [...]}
+                elif "words" in d:
+                    _banned_words.clear()
+                    _banned_words.extend(d["words"])
+                    _save_banned_words()
             except Exception:
                 pass
             return self._json({"ok": True})
@@ -1550,10 +1940,7 @@ class Handler(BaseHTTPRequestHandler):
                 text = data.get("text", "")
                 if not text:
                     return self._json({"ok": False, "error": "text 为空"})
-                future = asyncio.run_coroutine_threadsafe(
-                    _generate_tts_async(text), _ws_loop
-                )
-                filepath, url = future.result(timeout=60)
+                filepath, url = asyncio.run(_generate_tts_async(text))
                 if filepath and os.path.isfile(filepath):
                     # 返回音频数据
                     ext = os.path.splitext(filepath)[1].lower()
@@ -1598,10 +1985,16 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(handler)
         # CosyVoice 部署（独立处理 — 需要动态状态）
         if path == "/api/tts/cosyvoice-deploy":
-            _cv_deploy["deploying"] = True
-            _cv_deploy["_step"] = 0
-            _cv_deploy["progress"] = _CV_STEPS[0]
-            _cv_deploy["error"] = None
+            with _cv_deploy_lock:
+                cur = _cv_deploy_progress.get("step", "")
+                if cur and cur != "error":
+                    return self._json({"ok": False, "error": "部署正在进行或已完成"})
+                _cv_deploy_progress.clear()
+                _cv_deploy_progress["step"] = "starting"
+                _cv_deploy_progress["pct"] = 0
+                _cv_deploy_progress["text"] = "启动部署..."
+            t = threading.Thread(target=_run_cosyvoice_deploy, daemon=True)
+            t.start()
             return self._json({"ok": True})
         self._json({"error": "not found"}, status=404)
 
@@ -1611,6 +2004,18 @@ class Handler(BaseHTTPRequestHandler):
 
     # ── DELETE ──
     def do_DELETE(self):
+        path = self._parse_path()
+        if path == "/api/admin/banned-words":
+            try:
+                raw = self._read_body()
+                d = json.loads(raw.decode("utf-8"))
+                word = d.get("word", "")
+                if word and word in _banned_words:
+                    _banned_words.remove(word)
+                    _save_banned_words()
+            except Exception:
+                pass
+            return self._json({"ok": True})
         self._json({"ok": True})
 
     # ── Response helpers ──
@@ -1808,6 +2213,10 @@ def main():
         daemon=True,
     )
     ws_thread.start()
+
+    # ── 后台预加载 CosyVoice（不阻塞 HTTP）──
+    t = threading.Thread(target=_background_preload_cosyvoice, daemon=True)
+    t.start()
 
     if args.no_gui:
         print("\n[无 GUI 模式] 按 Ctrl+C 停止...")

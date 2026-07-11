@@ -194,6 +194,35 @@ def register_cosyvoice_speaker(spk_id: str, prompt_wav_path: str) -> bool:
         return False
 
 
+def remove_cosyvoice_speaker(spk_id: str) -> bool:
+    """删除一个已注册的说话人（不允许删除 default）。"""
+    if spk_id == DEFAULT_SPK_ID:
+        print(f"[TTS] Cannot remove default speaker")
+        return False
+    removed = False
+    try:
+        # 从引擎中移除（如果已加载）
+        eng = _load_cosyvoice()
+        if eng is not None and spk_id in eng.frontend.spk2info:
+            del eng.frontend.spk2info[spk_id]
+            removed = True
+    except Exception as e:
+        print(f"[TTS] Remove from engine failed (non-fatal): {e}")
+    # 删除对应的 WAV 文件（即使引擎未加载）
+    try:
+        asset_dir = COSYVOICE_DIR / "asset"
+        for wav_path in [asset_dir / f"{spk_id}.wav", asset_dir / f"zero_shot_prompt_{spk_id}.wav"]:
+            if wav_path.exists():
+                wav_path.unlink()
+                print(f"[TTS] Deleted speaker file: {wav_path}")
+                removed = True
+    except Exception as e:
+        print(f"[TTS] Delete file failed: {e}")
+    if removed:
+        print(f"[TTS] Speaker '{spk_id}' removed")
+    return removed
+
+
 def cosyvoice_generate(text: str, spk_id: str = DEFAULT_SPK_ID) -> tuple:
     """Return (sample_rate, wav_bytes) or (None, None) on failure. spk_id 选择说话人。"""
     import soundfile as sf

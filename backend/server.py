@@ -3,37 +3,29 @@ CCcat 海龟汤 — 合并版服务（单进程）
 整合 LLM 分类 + WebSocket 游戏 + 弹幕中继 + 嵌入式前端
 """
 import asyncio
-import json
-import os
-import sys
 import time
 import subprocess
 import webbrowser
 from pathlib import Path
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel
-from openai import OpenAI
 import uvicorn
 from admin import ADMIN_HTML
 from overlay import OVERLAY_HTML
 from state import (
-    LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, SERVER_PORT, FRONTEND_PORT,
-    PROJECT_ROOT, DATA_ROOT, FRONTEND_DIR, FRONTEND_DIST,
+    LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, SERVER_PORT,
+    FRONTEND_DIR, FRONTEND_DIST,
     ANTI_STALL_ENABLED, ANTI_STALL_INTERVAL, ANTI_STALL_DANMAKU,
-    ANTI_STALL_DECAY, AUTO_START_DELAY, ROUND_TIMEOUT,
-    MOCK_LEADERBOARD, GIFT_PRICES, GIFT_LIBRARY, GIFT_NAME_MAP,
-    SCORE_BY_DIFFICULTY, DIFFICULTY_MULTIPLIER,
-    DIFFICULTY_NAME_MAP, COMBO_TAUNTS, SLOT_TAUNTS,
-    room, manager, coins, db, slot_manager, spam_filter, theme_manager, SOUPS,
-    CoinSystem, RevealEngine, GameRoom, ConnectionManager,
+    ANTI_STALL_DECAY, AUTO_START_DELAY,
+    MOCK_LEADERBOARD,
+    room, manager, db, spam_filter, theme_manager,
     get_client, recreate_client,
-    llm_classify, llm_gift_solicit, add_score,
-    compute_adaptive_difficulty, auto_reveal_and_hint, reload_config,
-    handle_gift,
+    llm_classify, llm_hint, llm_gift_solicit,
+    auto_reveal_and_hint,
 )
 from ws_handler import websocket_handler, handle_danmaku
 
@@ -204,7 +196,8 @@ async def classify(req: ClassifyReq):
 
 @app.post("/hint")
 async def hint(req: HintReq):
-    return {"hint": "想想故事里谁最可疑？", "note": "fixed_fallback"}
+    hint_text = await llm_hint(req.qaHistory, req.answer, req.keywords)
+    return {"hint": hint_text, "layer": "llm"}
 
 @app.post("/gift-solicit")
 async def gift_solicit(req: GiftSolicitReq):

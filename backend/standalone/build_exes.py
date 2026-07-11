@@ -103,12 +103,17 @@ def build():
             "--hidden-import", "webview.platforms.win32",
             "--hidden-import", "webview.platforms.winforms",
             "--hidden-import", "websockets",
-            "--hidden-import", "bottle",
-            "--hidden-import", "cryptography",
             "--hidden-import", "sqlite3",  # theme_manager.py exec 需要
             "--hidden-import", "tkinter",  # auth_window.py 授权窗口
             "--hidden-import", "edge_tts",  # TTS 语音合成
             "--hidden-import", "certifi",  # edge-tts 依赖
+            # 排除不必要的依赖减少体积
+            "--exclude-module", "pyarrow",
+            "--exclude-module", "torch",
+            "--exclude-module", "torchaudio",
+            "--exclude-module", "transformers",
+            "--exclude-module", "diffusers",
+            "--exclude-module", "librosa",
         ]
 
         # 独立版隐藏控制台窗口
@@ -117,7 +122,9 @@ def build():
 
         cmd.extend(["--noconfirm", script_path])
 
-        subprocess.check_call(cmd, cwd=_HERE)
+        # 设置 CUDA_VISIBLE_DEVICES 防止 torch 加载 CUDA DLL 导致 isolated child 崩溃
+        build_env = {**os.environ, "CUDA_VISIBLE_DEVICES": ""}
+        subprocess.check_call(cmd, cwd=_HERE, env=build_env)
 
         # rename output
         built_exe = os.path.join(_DIST, f"{os.path.splitext(out_name)[0]}.exe")

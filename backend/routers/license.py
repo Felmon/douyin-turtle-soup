@@ -35,6 +35,47 @@ class ActivateReq(BaseModel):
     key: str
 
 
+def _auth_format(status_response: dict) -> dict:
+    """将 license status 响应转为 admin.js 期望的 auth 格式（含 ok/machine_id/reason 等字段）。"""
+    status = status_response.get("status", "")
+    mid = _lic.get_machine_id() if LIC_AVAILABLE else ""
+    if status == "active":
+        return {
+            "ok": True, "is_permanent": status_response.get("is_permanent", False),
+            "remaining_days": status_response.get("remaining_days", 0),
+            "source": status_response.get("source", ""), "machine_id": mid,
+            "trial_available": True,
+        }
+    if status == "trial":
+        return {
+            "ok": True, "source": "trial",
+            "remaining_seconds": status_response.get("remaining_seconds", 0),
+            "machine_id": mid, "trial_available": True,
+        }
+    reason_map = {"trial_expired": "trial_expired", "expired": "license_expired",
+                  "inactive": "inactive", "unavailable": "unavailable"}
+    return {
+        "ok": False, "reason": reason_map.get(status, "unknown"),
+        "machine_id": mid, "trial_available": status in ("trial_available", "inactive", "unavailable"),
+    }
+
+
+@router.get("/api/auth/status")
+async def auth_status():
+    result = await license_status()
+    return _auth_format(result)
+
+
+@router.get("/api/auth/start-trial")
+async def auth_start_trial():
+    return await trial_start()
+
+
+@router.post("/api/auth/activate")
+async def auth_activate(req: ActivateReq):
+    return await license_activate(req)
+
+
 @router.get("/api/license/status")
 async def license_status():
     """返回当前授权状态（服务端视角）"""

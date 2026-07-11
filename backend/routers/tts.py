@@ -1,7 +1,8 @@
 """
 TTS 路由 — /api/tts/*
 """
-from fastapi import APIRouter, UploadFile, File
+import re
+from fastapi import APIRouter, UploadFile, File, Form
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 from state import (
@@ -124,19 +125,24 @@ async def tts_cosyvoice_deploy_start():
     return {"ok": True, "message": "部署已启动"}
 
 @router.post("/api/tts/cosyvoice-speaker")
-async def tts_cosyvoice_add_speaker(file: UploadFile = File(...)):
+async def tts_cosyvoice_add_speaker(file: UploadFile = File(...), name: str = Form("")):
     if file.content_type not in ("audio/wav", "audio/x-wav"):
         return JSONResponse({"ok": False, "error": "仅支持 WAV 文件"}, status_code=400)
     asset_dir = tts_engine.COSYVOICE_DIR / "asset"
     asset_dir.mkdir(parents=True, exist_ok=True)
-    spk_id = f"upload_{uuid.uuid4().hex[:8]}"
+    # 优先级：用户命名 > 文件名 > 随机 ID
+    spk_id = name.strip()
+    if not spk_id and file.filename:
+        spk_id = re.sub(r'[^\w一-鿿\-]', '', Path(file.filename).stem)
+    if not spk_id:
+        spk_id = f"upload_{uuid.uuid4().hex[:8]}"
     fname = f"zero_shot_prompt_{spk_id}.wav"
     dest = asset_dir / fname
     content = await file.read()
     dest.write_bytes(content)
     ok = tts_engine.register_cosyvoice_speaker(spk_id, str(dest))
     if ok:
-        return {"ok": True, "spk_id": spk_id, "name": fname}
+        return {"ok": True, "spk_id": spk_id, "name": spk_id}
     dest.unlink(missing_ok=True)
     return JSONResponse({"ok": False, "error": "说话人注册失败"}, status_code=500)
 

@@ -4,15 +4,12 @@ CCcat 海龟汤 — 共享状态模块
 路由模块和 server.py 均从此导入。
 """
 import asyncio
-import json
 import os
 import re
 import sys
 import time
-import math
 import random as rnd
 import subprocess
-import uuid
 from pathlib import Path
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -237,6 +234,30 @@ SLOT_TAUNTS = {
     "effect_reveal_sentence": ["完整一句揭开！", "迷雾散开一些了！"],
     "effect_reveal_30p": ["大量内容揭示！", "真相即将大白！"],
 }
+
+async def llm_hint(qa_history: list[dict], answer: str, keywords: list[str]) -> str:
+    """生成提示，引导玩家接近答案"""
+    fallback = "想想故事里谁最可疑？"
+    try:
+        recent = qa_history[-5:] if qa_history else []
+        history_text = "\n".join(
+            f"玩家提问: {q.get('question','')} → AI判定: {q.get('result','')}"
+            for q in recent
+        ) if recent else "暂无提问记录"
+        resp = get_client().chat.completions.create(
+            model=LLM_MODEL,
+            messages=[
+                {"role": "system", "content": "你是一个海龟汤提示助手。基于玩家已有的提问和答案，给出一个简短提示（不超过30字），引导玩家思考正确答案方向，但不要直接透露答案。"},
+                {"role": "user", "content": f"答案: {answer}\n关键词: {'、'.join(keywords)}\n\n最近提问历史:\n{history_text}\n\n请给出提示："},
+            ],
+            max_tokens=60, temperature=0.7,
+            reasoning_effort="none",
+        )
+        hint = resp.choices[0].message.content.strip().strip('"').strip("'")
+        return hint if hint else fallback
+    except Exception as e:
+        print(f"[LLM] hint error: {e}")
+        return fallback
 
 async def llm_gift_solicit(gift_type: str, context: dict) -> str:
     fallbacks = {

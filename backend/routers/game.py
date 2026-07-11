@@ -5,12 +5,10 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 from state import (
     room, manager, SOUPS, ROUND_TIMEOUT, DIFFICULTY_MULTIPLIER,
-    DIFFICULTY_NAME_MAP, RevealEngine, compute_adaptive_difficulty, SCORE_BY_DIFFICULTY,
-    get_client, llm_classify, spam_filter, add_score,
+    DIFFICULTY_NAME_MAP, RevealEngine, compute_adaptive_difficulty,
 )
 import random as rnd
 import time
-import json
 
 router = APIRouter(tags=["game"])
 
